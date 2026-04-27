@@ -1,0 +1,288 @@
+services:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # MongoDB Replica Set (3 nodos)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  mongo1:
+    image: mongo:7.0
+    container_name: rrv-mongo1
+    hostname: mongo1
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1_data:/data/db
+    command: ["mongod", "--replSet", "rrv-rs", "--bind_ip_all"]
+    networks:
+      - rrv-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  mongo2:
+    image: mongo:7.0
+    container_name: rrv-mongo2
+    hostname: mongo2
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2_data:/data/db
+    command: ["mongod", "--replSet", "rrv-rs", "--bind_ip_all"]
+    networks:
+      - rrv-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  mongo3:
+    image: mongo:7.0
+    container_name: rrv-mongo3
+    hostname: mongo3
+    restart: unless-stopped
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo3_data:/data/db
+    command: ["mongod", "--replSet", "rrv-rs", "--bind_ip_all"]
+    networks:
+      - rrv-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  # Inicializa RS + esquema + seed (corre una vez y termina)
+  mongo-setup:
+    image: mongo:7.0
+    container_name: rrv-mongo-setup
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    volumes:
+      - ./init:/scripts
+    command: ["bash", "/scripts/01-rs-init.sh"]
+    networks:
+      - rrv-net
+    restart: "no"
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # API de Ingesta RRV (FastAPI)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  api:
+    build:
+      context: ../rrv/api
+      dockerfile: Dockerfile
+    container_name: rrv-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"     # http://localhost:8000
+                        # Docs → http://localhost:8000/docs
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/rrv_db?replicaSet=rrv-rs
+      KAFKA_BOOTSTRAP: kafka:9092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: rrv_admin
+      MINIO_SECRET_KEY: rrv_minio_2025
+      MINIO_BUCKET_RRV: actas-rrv
+      SMS_SECRET_KEY: clave-secreta-rrv-2025
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - rrv-net
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # OCR Worker (consume actas.recibidas → procesa imagen → emite actas.ocr)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  worker:
+    build:
+      context: ../rrv/worker
+      dockerfile: Dockerfile
+    container_name: rrv-worker
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/rrv_db?replicaSet=rrv-rs
+      KAFKA_BOOTSTRAP: kafka:9092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: rrv_admin
+      MINIO_SECRET_KEY: rrv_minio_2025
+      OCR_MIN_CONFIDENCE: "0.80"
+    volumes:
+      - paddleocr_models:/app/.paddleocr   # modelos OCR persistentes entre reinicios
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - rrv-net
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Validator (consume actas.ocr → valida reglas → emite validadas/rechazadas)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  validator:
+    build:
+      context: ../rrv/validator
+      dockerfile: Dockerfile
+    container_name: rrv-validator
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/rrv_db?replicaSet=rrv-rs
+      KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - rrv-net
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Apache Kafka (KRaft — sin ZooKeeper)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: rrv-kafka
+    restart: unless-stopped
+    ports:
+      - "9094:9094"       # acceso desde el host (app / herramientas externas)
+    environment:
+      # KRaft: este nodo actúa como broker Y controller
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # Listeners:
+      #   PLAINTEXT  → comunicación interna entre contenedores
+      #   CONTROLLER → protocolo KRaft (elección de líder)
+      #   EXTERNAL   → acceso desde el host (localhost:9094)
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"   # creamos los topics explícitamente
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168             # retención 7 días (event sourcing)
+      KAFKA_CFG_LOG_SEGMENT_BYTES: 104857600         # segmentos de 100 MB
+    volumes:
+      - kafka_data:/bitnami/kafka
+    networks:
+      - rrv-net
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--list", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  # Crea los topics una vez que Kafka está sano (corre una vez y termina)
+  kafka-init:
+    image: bitnami/kafka:3.7
+    container_name: rrv-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo '▶ Creando topics del pipeline RRV...' &&
+        kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092
+          --topic actas.recibidas  --partitions 3 --replication-factor 1 &&
+        kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092
+          --topic actas.ocr        --partitions 3 --replication-factor 1 &&
+        kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092
+          --topic actas.validadas  --partitions 3 --replication-factor 1 &&
+        kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092
+          --topic actas.rechazadas --partitions 1 --replication-factor 1 &&
+        kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092
+          --topic actas.dlq        --partitions 1 --replication-factor 1 &&
+        echo '✔ Topics creados:' &&
+        kafka-topics.sh --list --bootstrap-server kafka:9092
+      "
+    networks:
+      - rrv-net
+    restart: "no"
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # MinIO (Object Storage S3-compatible)
+  # Guarda las imágenes/PDFs originales de las actas para trazabilidad
+  # ══════════════════════════════════════════════════════════════════════════
+
+  minio:
+    image: minio/minio:latest
+    container_name: rrv-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"     # API S3 (usado por la app)
+      - "9001:9001"     # Consola web → http://localhost:9001
+    environment:
+      MINIO_ROOT_USER: rrv_admin
+      MINIO_ROOT_PASSWORD: rrv_minio_2025
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - rrv-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # Crea los buckets una vez que MinIO está sano (corre una vez y termina)
+  minio-init:
+    image: minio/mc:latest
+    container_name: rrv-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set rrv http://minio:9000 rrv_admin rrv_minio_2025 &&
+        mc mb --ignore-existing rrv/actas-rrv &&
+        mc mb --ignore-existing rrv/actas-oficial &&
+        mc anonymous set download rrv/actas-rrv &&
+        echo '✔ Buckets listos:' &&
+        mc ls rrv
+      "
+    networks:
+      - rrv-net
+    restart: "no"
+
+# ════════════════════════════════════════════════════════════════════════════
+networks:
+  rrv-net:
+    driver: bridge
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  kafka_data:
+  minio_data:
+  paddleocr_models:

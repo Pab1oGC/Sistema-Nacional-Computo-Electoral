@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# PaddleOCR models (se descargan en runtime, ~100MB+)
+.paddleocr/

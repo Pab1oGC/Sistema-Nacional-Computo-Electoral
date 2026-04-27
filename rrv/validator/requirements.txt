@@ -1,0 +1,4 @@
+kafka-python==2.0.2
+pymongo==4.9.2
+python-dotenv==1.0.1
+pydantic-settings==2.6.1

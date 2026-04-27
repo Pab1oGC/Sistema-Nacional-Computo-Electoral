@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>RRV — Recuento Rápido de Votos</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; font-size: 14px; background: #111; color: #ddd; padding: 16px; }
+    h1 { font-size: 18px; color: #fff; margin-bottom: 4px; }
+    .sub { color: #888; font-size: 12px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: #1a1a1a; border: 1px solid #333; padding: 14px; }
+    .card h2 { font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: #888; font-size: 11px; border-bottom: 1px solid #333; padding: 4px 6px; }
+    td { padding: 5px 6px; border-bottom: 1px solid #222; }
+    .bar-wrap { background: #222; height: 10px; width: 100%; margin-top: 6px; }
+    .bar { height: 10px; background: #4caf50; transition: width .5s; }
+    .pct { font-size: 28px; color: #4caf50; font-weight: bold; }
+    .kv { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #222; }
+    .kv span:first-child { color: #888; }
+    .kv span:last-child { color: #fff; }
+    .badge { display: inline-block; padding: 1px 6px; font-size: 11px; border-radius: 2px; }
+    .VALIDADA   { background:#1b5e20; color:#a5d6a7; }
+    .RECIBIDA   { background:#1a237e; color:#90caf9; }
+    .RECHAZADA  { background:#b71c1c; color:#ef9a9a; }
+    .OCR_PROCESANDO { background:#4a148c; color:#ce93d8; }
+    .err { color: #ef5350; }
+    #ts { float: right; color: #555; font-size: 11px; }
+    .full { grid-column: 1 / -1; }
+    .cname { font-weight: bold; color: #fff; }
+    .color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Bolivia — Recuento Rápido de Votos &nbsp;<span id="ts"></span></h1>
+  <p class="sub">Actualización automática cada 5 segundos &nbsp;|&nbsp; <a href="/docs" style="color:#888">API Docs</a></p>
+
+  <div class="grid">
+
+    <!-- AVANCE -->
+    <div class="card">
+      <h2>Avance del escrutinio</h2>
+      <div id="avance-content">Cargando...</div>
+    </div>
+
+    <!-- ESTADO SISTEMA -->
+    <div class="card">
+      <h2>Estado del sistema</h2>
+      <div id="estado-content">Cargando...</div>
+    </div>
+
+    <!-- RESULTADOS -->
+    <div class="card full">
+      <h2>Resultados por candidato</h2>
+      <table>
+        <thead><tr><th>Candidato</th><th>Partido</th><th>Votos</th><th style="width:40%">%</th></tr></thead>
+        <tbody id="resultados-body"><tr><td colspan="4">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- ULTIMAS ACTAS -->
+    <div class="card full">
+      <h2>Últimas actas recibidas</h2>
+      <table>
+        <thead><tr><th>Mesa</th><th>Tipo</th><th>Estado</th><th>Recibida</th><th>Válidos</th><th>Blancos</th><th>Nulos</th></tr></thead>
+        <tbody id="actas-body"><tr><td colspan="7">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- INCONSISTENCIAS -->
+    <div class="card full">
+      <h2>Inconsistencias registradas</h2>
+      <table>
+        <thead><tr><th>Mesa</th><th>Tipo</th><th>Detalle</th><th>Fecha</th></tr></thead>
+        <tbody id="incons-body"><tr><td colspan="4">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+
+  </div>
+
+<script>
+const API = '';  // misma origin
+
+function fmt(n) { return n != null ? n.toLocaleString('es-BO') : '—'; }
+function fmtTs(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  return d.toLocaleString('es-BO', { hour12: false });
+}
+
+async function fetchJson(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function loadAvance() {
+  const d = await fetchJson('/api/v1/avance');
+  const pct = d.porcentaje_avance ?? 0;
+  document.getElementById('avance-content').innerHTML = `
+    <div class="pct">${pct.toFixed(1)}%</div>
+    <div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>
+    <div style="margin-top:10px">
+      <div class="kv"><span>Mesas totales</span><span>${fmt(d.total_mesas)}</span></div>
+      <div class="kv"><span>Actas validadas</span><span>${fmt(d.actas_validadas)}</span></div>
+      <div class="kv"><span>Actas pendientes</span><span>${fmt(d.actas_pendientes)}</span></div>
+    </div>`;
+}
+
+async function loadEstado() {
+  const d = await fetchJson('/api/v1/avance');
+  document.getElementById('estado-content').innerHTML = `
+    <div class="kv"><span>Recibidas</span><span>${fmt(d.actas_recibidas)}</span></div>
+    <div class="kv"><span>Procesando</span><span>${fmt(d.actas_procesando)}</span></div>
+    <div class="kv"><span>Validadas</span><span style="color:#a5d6a7">${fmt(d.actas_validadas)}</span></div>
+    <div class="kv"><span>Rechazadas</span><span style="color:#ef9a9a">${fmt(d.actas_rechazadas)}</span></div>
+    <div class="kv"><span>Última actualización</span><span>${fmtTs(d.ultima_actualizacion)}</span></div>`;
+}
+
+async function loadResultados() {
+  const d = await fetchJson('/api/v1/resultados');
+  const tbody = document.getElementById('resultados-body');
+  if (!d.candidatos || d.candidatos.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#555">Sin votos aún</td></tr>';
+    return;
+  }
+  const max = Math.max(...d.candidatos.map(c => c.votos_total || 0));
+  tbody.innerHTML = d.candidatos.map(c => {
+    const pct = c.porcentaje ?? 0;
+    const w = max > 0 ? ((c.votos_total || 0) / max * 100) : 0;
+    return `<tr>
+      <td><span class="color-dot" style="background:${c.color || '#999'}"></span><span class="cname">${c.nombre}</span></td>
+      <td style="color:#888">${c.sigla || c.partido}</td>
+      <td>${fmt(c.votos_total)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="bar-wrap" style="flex:1"><div class="bar" style="width:${w}%;background:${c.color || '#4caf50'}"></div></div>
+          <span style="width:42px;text-align:right">${pct.toFixed(1)}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadActas() {
+  const d = await fetchJson('/api/v1/actas?limit=10');
+  const tbody = document.getElementById('actas-body');
+  if (!d.items || d.items.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:#555">Sin actas aún</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.items.map(a => {
+    const v = a.votos || {};
+    return `<tr>
+      <td>${a.codigo_mesa}</td>
+      <td>${a.tipo_entrada}</td>
+      <td><span class="badge ${a.estado}">${a.estado}</span></td>
+      <td>${fmtTs(a.timestamp_recepcion)}</td>
+      <td>${fmt(v.validos)}</td>
+      <td>${fmt(v.blancos)}</td>
+      <td>${fmt(v.nulos)}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadInconsistencias() {
+  const d = await fetchJson('/api/v1/inconsistencias?limit=10');
+  const tbody = document.getElementById('incons-body');
+  if (!d.items || d.items.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#555">Sin inconsistencias</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.items.map(i => `<tr>
+    <td>${i.codigo_mesa ?? '—'}</td>
+    <td class="err">${i.tipo_inconsistencia ?? i.tipo ?? '—'}</td>
+    <td style="color:#aaa;font-size:12px">${i.detalle ?? ''}</td>
+    <td>${fmtTs(i.ts)}</td>
+  </tr>`).join('');
+}
+
+async function refresh() {
+  document.getElementById('ts').textContent = new Date().toLocaleTimeString('es-BO', {hour12:false});
+  await Promise.allSettled([loadAvance(), loadEstado(), loadResultados(), loadActas(), loadInconsistencias()]);
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
