@@ -1,43 +1,34 @@
-import React, { useEffect } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, Image, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
-import Animated, {
-  useSharedValue, useAnimatedStyle,
-  withSpring, withTiming,
-} from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { Colors, Typography, Spacing, Radius, Animation } from '../constants/theme';
+import { Colors, Typography, Spacing, Radius } from '../constants/theme';
 import { FlagStripe } from '../components/FlagStripe';
 import { useAppStore } from '../store/appStore';
-
-const { width, height } = Dimensions.get('window');
 
 export default function ReviewScreen() {
   const router = useRouter();
   const store  = useAppStore();
 
-  const imgScale   = useSharedValue(0.85);
-  const imgOpacity = useSharedValue(0);
-  const btnY       = useSharedValue(40);
-  const btnOpacity = useSharedValue(0);
-
-  const imgStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: imgScale.value }],
-    opacity: imgOpacity.value,
-  }));
-
-  const btnStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: btnY.value }],
-    opacity: btnOpacity.value,
-  }));
+  const imgScale   = useRef(new Animated.Value(0.85)).current;
+  const imgOpacity = useRef(new Animated.Value(0)).current;
+  const btnY       = useRef(new Animated.Value(40)).current;
+  const btnOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    imgScale.value   = withSpring(1, Animation.spring);
-    imgOpacity.value = withTiming(1, { duration: Animation.normal });
-    btnY.value       = withSpring(0, { ...Animation.spring, damping: 18 });
-    btnOpacity.value = withTiming(1, { duration: 400 });
+    Animated.parallel([
+      Animated.spring(imgScale, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
+      Animated.timing(imgOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+    Animated.sequence([
+      Animated.delay(150),
+      Animated.parallel([
+        Animated.spring(btnY,    { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
+        Animated.timing(btnOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ]),
+    ]).start();
   }, []);
 
   function handleConfirm() {
@@ -52,15 +43,15 @@ export default function ReviewScreen() {
     router.back();
   }
 
-  if (!store.capturedPhotoUri) {
-    router.replace('/camera');
-    return null;
-  }
+  useEffect(() => {
+    if (!store.capturedPhotoUri) router.replace('/camera');
+  }, [store.capturedPhotoUri]);
+
+  if (!store.capturedPhotoUri) return null;
 
   return (
     <View style={styles.container}>
-      {/* Photo fullscreen */}
-      <Animated.View style={[StyleSheet.absoluteFill, imgStyle]}>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: imgOpacity, transform: [{ scale: imgScale }] }]}>
         <Image
           source={{ uri: store.capturedPhotoUri }}
           style={StyleSheet.absoluteFill}
@@ -77,18 +68,16 @@ export default function ReviewScreen() {
       </BlurView>
 
       {/* Bottom actions */}
-      <Animated.View style={[styles.bottomBar, btnStyle]}>
+      <Animated.View style={[styles.bottomBar, { opacity: btnOpacity, transform: [{ translateY: btnY }] }]}>
         <BlurView intensity={60} tint="dark" style={styles.bottomBlur}>
           <Text style={styles.reviewHint}>
             Asegúrate de que el acta sea legible y esté completa
           </Text>
           <FlagStripe height={2} marginVertical={12} />
-
           <View style={styles.actions}>
             <TouchableOpacity style={styles.retryBtn} onPress={handleRetry} activeOpacity={0.8}>
               <Text style={styles.retryText}>↩ Repetir</Text>
             </TouchableOpacity>
-
             <TouchableOpacity onPress={handleConfirm} activeOpacity={0.85} style={{ flex: 1 }}>
               <LinearGradient
                 colors={[Colors.red, '#9A0B22']}
@@ -107,39 +96,19 @@ export default function ReviewScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+  container: { flex: 1, backgroundColor: '#000' },
   topBar: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingTop: 52,
-    paddingBottom: 16,
+    top: 0, left: 0, right: 0,
+    paddingTop: 52, paddingBottom: 16,
     overflow: 'hidden',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  topBarContent: {
-    paddingHorizontal: Spacing.lg,
-    gap: 2,
-  },
-  topTitle: {
-    ...Typography.subtitle,
-    color: Colors.textPrimary,
-  },
-  topSub: {
-    ...Typography.caption,
-    color: Colors.textSecondary,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
+  topBarContent: { paddingHorizontal: Spacing.lg, gap: 2 },
+  topTitle: { ...Typography.subtitle, color: Colors.textPrimary },
+  topSub:   { ...Typography.caption,  color: Colors.textSecondary },
+  bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0 },
   bottomBlur: {
     padding: Spacing.lg,
     paddingBottom: 40,
@@ -147,16 +116,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.1)',
   },
-  reviewHint: {
-    ...Typography.caption,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
+  reviewHint: { ...Typography.caption, color: Colors.textSecondary, textAlign: 'center' },
+  actions:    { flexDirection: 'row', gap: 12, alignItems: 'center' },
   retryBtn: {
     backgroundColor: Colors.card,
     borderRadius: Radius.xl,
@@ -165,18 +126,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  retryText: {
-    ...Typography.body,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  confirmBtn: {
-    borderRadius: Radius.xl,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  confirmText: {
-    ...Typography.subtitle,
-    color: Colors.textPrimary,
-  },
+  retryText:   { ...Typography.body,    color: Colors.textSecondary, fontWeight: '600' },
+  confirmBtn:  { borderRadius: Radius.xl, paddingVertical: 14, alignItems: 'center' },
+  confirmText: { ...Typography.subtitle, color: Colors.textPrimary },
 });

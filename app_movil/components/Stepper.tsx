@@ -1,7 +1,6 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import Animated, { useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-import { Colors, Animation } from '../constants/theme';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { Colors } from '../constants/theme';
 
 export type StepState = 'pending' | 'active' | 'done';
 
@@ -19,17 +18,22 @@ function StepNode({ icon, label, state }: Step) {
   const isDone   = state === 'done';
   const isActive = state === 'active';
 
-  const circleStyle = useAnimatedStyle(() => ({
-    backgroundColor: withTiming(
-      isDone ? Colors.success : isActive ? Colors.red : Colors.indicatorOff,
-      { duration: Animation.normal }
-    ),
-    transform: [{ scale: withSpring(isActive ? 1.15 : 1, Animation.spring) }],
-  }));
+  const scale = useRef(new Animated.Value(isActive ? 1.15 : 1)).current;
+
+  useEffect(() => {
+    Animated.spring(scale, {
+      toValue:  isActive ? 1.15 : 1,
+      tension:  120,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
+  }, [isActive]);
+
+  const bgColor = isDone ? Colors.success : isActive ? Colors.red : Colors.indicatorOff;
 
   return (
     <View style={styles.node}>
-      <Animated.View style={[styles.circle, circleStyle]}>
+      <Animated.View style={[styles.circle, { backgroundColor: bgColor, transform: [{ scale }] }]}>
         <Text style={styles.nodeIcon}>{isDone ? '✓' : icon}</Text>
       </Animated.View>
       <Text style={[styles.nodeLabel, isActive && { color: Colors.textPrimary }]}>
@@ -40,10 +44,14 @@ function StepNode({ icon, label, state }: Step) {
 }
 
 function Connector({ filled }: { filled: boolean }) {
-  const lineStyle = useAnimatedStyle(() => ({
-    backgroundColor: withTiming(filled ? Colors.success : Colors.indicatorOff, { duration: Animation.slow }),
-  }));
-  return <Animated.View style={[styles.connector, lineStyle]} />;
+  return (
+    <View
+      style={[
+        styles.connector,
+        { backgroundColor: filled ? Colors.success : Colors.indicatorOff },
+      ]}
+    />
+  );
 }
 
 export function Stepper({ steps }: Props) {
@@ -52,9 +60,7 @@ export function Stepper({ steps }: Props) {
       {steps.map((step, i) => (
         <React.Fragment key={i}>
           <StepNode {...step} />
-          {i < steps.length - 1 && (
-            <Connector filled={steps[i].state === 'done'} />
-          )}
+          {i < steps.length - 1 && <Connector filled={steps[i].state === 'done'} />}
         </React.Fragment>
       ))}
     </View>
@@ -68,10 +74,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
   },
-  node: {
-    alignItems: 'center',
-    gap: 6,
-  },
+  node: { alignItems: 'center', gap: 6 },
   circle: {
     width: 44,
     height: 44,
@@ -79,10 +82,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  nodeIcon: {
-    fontSize: 18,
-    color: Colors.textPrimary,
-  },
+  nodeIcon:  { fontSize: 18, color: Colors.textPrimary },
   nodeLabel: {
     fontSize: 10,
     color: Colors.textSecondary,

@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ScrollView, KeyboardAvoidingView, Platform, Alert, Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors, Typography, Spacing, Radius } from '../constants/theme';
@@ -24,18 +23,39 @@ const TERRITORIALES = [
   { codigo: '90901', label: 'Cobija — Nicolás Suárez — Cobija' },
 ];
 
-export default function SetupScreen() {
-  const router     = useRouter();
-  const store      = useAppStore();
+function useFadeIn(delay = 0) {
+  const opacity    = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(18)).current;
+  useEffect(() => {
+    Animated.sequence([
+      Animated.delay(delay),
+      Animated.parallel([
+        Animated.timing(opacity,    { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.spring(translateY, { toValue: 0, tension: 80, friction: 12, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, []);
+  return { opacity, transform: [{ translateY }] };
+}
 
-  const [mesa,       setMesa]       = useState(store.codigoMesa);
-  const [recinto,    setRecinto]    = useState(store.codigoRecinto);
+export default function SetupScreen() {
+  const router = useRouter();
+  const store  = useAppStore();
+
+  const [mesa,        setMesa]       = useState(store.codigoMesa);
+  const [recinto,     setRecinto]    = useState(store.codigoRecinto);
   const [territorial, setTerritorial] = useState(store.codigoTerritorial || TERRITORIALES[0].codigo);
-  const [showPicker, setShowPicker] = useState(false);
+  const [showPicker,  setShowPicker] = useState(false);
+  const pendingQueue = useAppStore((s) => s.pendingQueue);
+
+  const fade0 = useFadeIn(100);
+  const fade1 = useFadeIn(200);
+  const fade2 = useFadeIn(300);
+  const fade3 = useFadeIn(400);
 
   const selectedLabel = TERRITORIALES.find(t => t.codigo === territorial)?.label ?? territorial;
 
-  function handleContinue() {
+  function handleContinue(dest: '/camera' | '/form') {
     if (!mesa.trim() || mesa.length < 4) {
       Alert.alert('Código de Mesa', 'Ingresa un código de mesa válido (mínimo 4 dígitos).');
       return;
@@ -46,7 +66,7 @@ export default function SetupScreen() {
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     store.setMesaConfig(mesa.trim(), recinto.trim(), territorial);
-    router.push('/camera');
+    router.push(dest);
   }
 
   return (
@@ -56,7 +76,6 @@ export default function SetupScreen() {
       end={{ x: 0.7, y: 1 }}
       style={{ flex: 1 }}
     >
-      {/* Watermark */}
       <View style={styles.watermark} pointerEvents="none">
         <BoliviaSeal size={260} opacity={0.05} />
       </View>
@@ -69,16 +88,14 @@ export default function SetupScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
-          <Animated.View entering={FadeInDown.delay(100).springify()} style={styles.header}>
+          <Animated.View style={[styles.header, fade0]}>
             <BoliviaSeal size={70} opacity={1} />
             <Text style={styles.title}>Configuración de Mesa</Text>
             <Text style={styles.subtitle}>Ingresa los datos de tu mesa electoral</Text>
             <FlagStripe height={2} marginVertical={12} />
           </Animated.View>
 
-          {/* Form */}
-          <Animated.View entering={FadeInDown.delay(200).springify()} style={styles.card}>
+          <Animated.View style={[styles.card, fade1]}>
             <Text style={styles.fieldLabel}>CÓDIGO DE MESA</Text>
             <TextInput
               style={styles.input}
@@ -128,27 +145,45 @@ export default function SetupScreen() {
             )}
           </Animated.View>
 
-          {/* Info */}
           {store.codigoMesa ? (
-            <Animated.View entering={FadeInDown.delay(300).springify()} style={styles.infoChip}>
+            <Animated.View style={[styles.infoChip, fade2]}>
               <Text style={styles.infoText}>
-                Mesa guardada anteriormente: <Text style={{ color: Colors.gold }}>{store.codigoMesa}</Text>
+                Mesa guardada: <Text style={{ color: Colors.gold }}>{store.codigoMesa}</Text>
               </Text>
             </Animated.View>
           ) : null}
 
-          {/* Button */}
-          <Animated.View entering={FadeInDown.delay(400).springify()} style={{ marginTop: Spacing.xl }}>
-            <TouchableOpacity onPress={handleContinue} activeOpacity={0.85}>
+          <Animated.View style={[{ marginTop: Spacing.xl, gap: 10 }, fade3]}>
+            <TouchableOpacity onPress={() => handleContinue('/camera')} activeOpacity={0.85}>
               <LinearGradient
                 colors={[Colors.red, '#9A0B22']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.btn}
               >
-                <Text style={styles.btnText}>Continuar →</Text>
+                <Text style={styles.btnText}>Capturar foto del acta →</Text>
               </LinearGradient>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleContinue('/form')}
+              activeOpacity={0.85}
+              style={styles.formBtn}
+            >
+              <Text style={styles.formBtnText}>Ingresar datos manualmente</Text>
+            </TouchableOpacity>
+
+            {pendingQueue.length > 0 && (
+              <TouchableOpacity
+                style={styles.pendingChip}
+                onPress={() => router.push('/pending')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.pendingChipText}>
+                  ⏳ {pendingQueue.length} envío{pendingQueue.length > 1 ? 's' : ''} pendiente{pendingQueue.length > 1 ? 's' : ''} · Sincronizar
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.historyBtn}
@@ -173,7 +208,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: -60,
     top: '30%',
-    opacity: 1,
   },
   header: {
     alignItems: 'center',
@@ -226,16 +260,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  pickerText: {
-    ...Typography.body,
-    color: Colors.textPrimary,
-    flex: 1,
-  },
-  pickerArrow: {
-    color: Colors.gold,
-    fontSize: 12,
-    marginLeft: 8,
-  },
+  pickerText: { ...Typography.body, color: Colors.textPrimary, flex: 1 },
+  pickerArrow: { color: Colors.gold, fontSize: 12, marginLeft: 8 },
   dropdown: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
@@ -250,13 +276,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
-  dropItemActive: {
-    backgroundColor: 'rgba(244,196,48,0.1)',
-  },
-  dropText: {
-    ...Typography.body,
-    color: Colors.textSecondary,
-  },
+  dropItemActive: { backgroundColor: 'rgba(244,196,48,0.1)' },
+  dropText: { ...Typography.body, color: Colors.textSecondary },
   infoChip: {
     backgroundColor: 'rgba(244,196,48,0.1)',
     borderRadius: Radius.md,
@@ -265,29 +286,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(244,196,48,0.2)',
   },
-  infoText: {
-    ...Typography.caption,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-  },
-  btn: {
+  infoText: { ...Typography.caption, color: Colors.textSecondary, textAlign: 'center' },
+  btn: { borderRadius: Radius.xl, paddingVertical: 16, alignItems: 'center' },
+  btnText: { ...Typography.subtitle, color: Colors.textPrimary, letterSpacing: 0.5 },
+  formBtn: {
     borderRadius: Radius.xl,
-    paddingVertical: 16,
+    paddingVertical: 15,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(244,196,48,0.4)',
+    backgroundColor: 'rgba(244,196,48,0.06)',
   },
-  btnText: {
-    ...Typography.subtitle,
-    color: Colors.textPrimary,
-    letterSpacing: 0.5,
-  },
-  historyBtn: {
+  formBtnText: { ...Typography.subtitle, color: Colors.gold },
+  pendingChip: {
+    borderRadius: Radius.xl,
+    paddingVertical: 12,
     alignItems: 'center',
-    marginTop: Spacing.md,
-    padding: Spacing.sm,
+    backgroundColor: 'rgba(255,214,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,214,0,0.3)',
   },
-  historyText: {
-    ...Typography.caption,
-    color: Colors.textSecondary,
-    textDecorationLine: 'underline',
-  },
+  pendingChipText: { ...Typography.caption, color: Colors.warning, fontWeight: '700' },
+  historyBtn: { alignItems: 'center', padding: Spacing.sm },
+  historyText: { ...Typography.caption, color: Colors.textSecondary, textDecorationLine: 'underline' },
 });

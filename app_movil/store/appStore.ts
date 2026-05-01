@@ -8,6 +8,17 @@ export interface ActaHistorial {
   codigoMesa: string;
   timestamp: Date;
   estado: 'VALIDADA' | 'REVISION' | 'RECHAZADA';
+  tipo?: 'foto' | 'formulario';
+}
+
+export interface PendingSubmission {
+  id: string;
+  codigoMesa: string;
+  codigoRecinto: string;
+  codigoTerritorial: string;
+  habilitados: string;
+  votos: Record<string, string>;
+  createdAt: string; // ISO string — safe for AsyncStorage JSON
 }
 
 interface AppState {
@@ -34,12 +45,19 @@ interface AppState {
   // Guide shown
   guideShown: boolean;
   markGuideShown: () => void;
+
+  // Offline pending queue
+  pendingQueue: PendingSubmission[];
+  addToPendingQueue: (sub: Omit<PendingSubmission, 'id' | 'createdAt'>) => Promise<void>;
+  removePendingItem: (id: string) => Promise<void>;
 }
 
+const QUEUE_KEY = 'pendingQueue_v1';
+
 export const useAppStore = create<AppState>((set, get) => ({
-  codigoMesa:         '',
-  codigoRecinto:      '',
-  codigoTerritorial:  '',
+  codigoMesa:        '',
+  codigoRecinto:     '',
+  codigoTerritorial: '',
 
   setMesaConfig: async (mesa, recinto, territorial) => {
     set({ codigoMesa: mesa, codigoRecinto: recinto, codigoTerritorial: territorial });
@@ -55,6 +73,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ codigoMesa: mesa, codigoRecinto: recinto, codigoTerritorial: territorial });
     const guideShown = await AsyncStorage.getItem('guideShown');
     if (guideShown === 'true') set({ guideShown: true });
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    if (raw) {
+      try { set({ pendingQueue: JSON.parse(raw) as PendingSubmission[] }); } catch { /* ignore */ }
+    }
   },
 
   capturedPhotoUri: null,
@@ -75,5 +97,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   markGuideShown: async () => {
     set({ guideShown: true });
     await AsyncStorage.setItem('guideShown', 'true');
+  },
+
+  pendingQueue: [],
+
+  addToPendingQueue: async (sub) => {
+    const item: PendingSubmission = {
+      ...sub,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [item, ...get().pendingQueue];
+    set({ pendingQueue: updated });
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(updated));
+  },
+
+  removePendingItem: async (id) => {
+    const updated = get().pendingQueue.filter((i) => i.id !== id);
+    set({ pendingQueue: updated });
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(updated));
   },
 }));

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# Environment variables
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Node / frontend artifacts
+node_modules/
+**/node_modules/
+dist/
+build/
+
+# Logs and local runtime output
+*.log
+logs/
+tmp/
+temp/
+
+# OCR/model/cache artifacts
+.paddleocr/
+**/.paddleocr/
+.cache/
+models/
+*.traineddata
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

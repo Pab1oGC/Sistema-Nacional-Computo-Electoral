@@ -1,7 +1,6 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import { Colors, Animation } from '../constants/theme';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated } from 'react-native';
+import { Colors } from '../constants/theme';
 
 export type IndicatorState = 'off' | 'warn' | 'ok';
 
@@ -18,21 +17,27 @@ const STATE_COLORS: Record<IndicatorState, string> = {
 };
 
 export function QualityIndicator({ icon, label, state }: Props) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.88, duration: 100, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, tension: 120, friction: 8, useNativeDriver: true }),
+    ]).start();
+  }, [state]);
+
   const color = STATE_COLORS[state];
 
-  const animStyle = useAnimatedStyle(() => ({
-    backgroundColor: withTiming(color + '33', { duration: Animation.normal }),
-    borderColor:     withTiming(color,        { duration: Animation.normal }),
-  }));
-
-  const textStyle = useAnimatedStyle(() => ({
-    color: withTiming(color, { duration: Animation.normal }),
-  }));
-
   return (
-    <Animated.View style={[styles.chip, animStyle]}>
-      <Animated.Text style={[styles.icon, textStyle]}>{icon}</Animated.Text>
-      <Animated.Text style={[styles.label, textStyle]}>{label}</Animated.Text>
+    <Animated.View
+      style={[
+        styles.chip,
+        { backgroundColor: color + '33', borderColor: color },
+        { transform: [{ scale }] },
+      ]}
+    >
+      <Text style={[styles.icon, { color }]}>{icon}</Text>
+      <Text style={[styles.label, { color }]}>{label}</Text>
     </Animated.View>
   );
 }
@@ -47,12 +52,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 5,
   },
-  icon: {
-    fontSize: 13,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
+  icon:  { fontSize: 13 },
+  label: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
 });

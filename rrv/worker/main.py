@@ -4,8 +4,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from kafka import KafkaConsumer
-from kafka.errors import NoBrokersAvailable
+from confluent_kafka import Consumer, KafkaError, KafkaException
 
 from config import settings
 from pipeline.downloader import download_file
@@ -27,24 +26,25 @@ TOPIC_DLQ = "actas.dlq"
 GROUP_ID  = "ocr-worker-group"
 
 
-def _get_consumer() -> KafkaConsumer:
+def _get_consumer() -> Consumer:
     for attempt in range(1, 11):
         try:
-            consumer = KafkaConsumer(
-                TOPIC_IN,
-                bootstrap_servers=[settings.kafka_bootstrap],
-                group_id=GROUP_ID,
-                auto_offset_reset="earliest",
-                enable_auto_commit=False,   # commit manual → at-least-once
-                value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-                key_deserializer=lambda k: k.decode("utf-8") if k else None,
-            )
+            c = Consumer({
+                "bootstrap.servers": settings.kafka_bootstrap,
+                "group.id": GROUP_ID,
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": False,
+                "socket.timeout.ms": 10000,
+                "session.timeout.ms": 30000,
+                "heartbeat.interval.ms": 5000,
+            })
+            c.subscribe([TOPIC_IN])
             logger.info("Conectado a Kafka en %s", settings.kafka_bootstrap)
-            return consumer
-        except NoBrokersAvailable:
-            logger.warning("Kafka no disponible, reintento %d/10...", attempt)
+            return c
+        except Exception as exc:
+            logger.warning("Kafka no disponible, reintento %d/10: %s", attempt, exc)
             time.sleep(5)
-    raise RuntimeError("No se pudo conectar a Kafka después de 10 intentos")
+    raise RuntimeError("No se pudo conectar a Kafka despues de 10 intentos")
 
 
 def _process(event: dict) -> None:
@@ -53,17 +53,14 @@ def _process(event: dict) -> None:
     tipo        = event["payload"].get("tipo_entrada", "FOTO")
     db          = get_db()
 
-    # Idempotencia: si ya pasó del estado RECIBIDA, no reprocesar
     acta = db.actas.find_one({"id_acta": id_acta}, {"estado": 1})
     if acta and acta.get("estado") not in ("RECIBIDA",):
         logger.info("Acta %s ya procesada (estado=%s), saltando", id_acta[:16], acta.get("estado"))
         return
 
-    # Marcar como en proceso
     db.actas.update_one({"id_acta": id_acta}, {"$set": {"estado": "OCR_PROCESANDO"}})
     db.vista_actas_estado.update_one({"_id": "global"}, {"$inc": {"actas_procesando": 1}})
 
-    # ── SMS: datos ya estructurados, no necesita OCR ──────────────────────
     if tipo == "SMS":
         resultado = {
             "id_acta":           id_acta,
@@ -76,19 +73,14 @@ def _process(event: dict) -> None:
             "confianza_ocr":     1.0,
             "requiere_revision": False,
         }
-
-    # ── FOTO/PDF: pipeline completo ───────────────────────────────────────
     else:
         archivo_path = event["payload"]["archivo_path"]
-        # archivo_path = "actas-rrv/2025/08/17/35000/abc123.pdf"
         bucket, object_name = archivo_path.split("/", 1)
-
         file_bytes = download_file(bucket, object_name)
         img_array  = preprocess(file_bytes, object_name)
         blocks     = run_ocr(img_array)
         resultado  = parse_acta(blocks, id_acta, codigo_mesa)
 
-    # ── Persistir datos extraídos en MongoDB ─────────────────────────────
     update: dict = {}
     if resultado.get("votos_extraidos"):
         update["votos"] = {
@@ -108,16 +100,15 @@ def _process(event: dict) -> None:
     db.actas.update_one({"id_acta": id_acta}, {"$set": update})
     db.vista_actas_estado.update_one({"_id": "global"}, {"$inc": {"actas_procesando": -1}})
 
-    # ── Emitir evento ActaOCRCompletada → actas.ocr ──────────────────────
     now = datetime.now(timezone.utc)
     evento_ocr = {
-        "id_evento":         str(uuid.uuid4()),
-        "tipo":              "ActaOCRCompletada",
-        "id_acta":           id_acta,
-        "codigo_mesa":       codigo_mesa,
-        "payload":           resultado,
-        "timestamp":         now.isoformat(),
-        "version":           1,
+        "id_evento":   str(uuid.uuid4()),
+        "tipo":        "ActaOCRCompletada",
+        "id_acta":     id_acta,
+        "codigo_mesa": codigo_mesa,
+        "payload":     resultado,
+        "timestamp":   now.isoformat(),
+        "version":     1,
     }
     emit(TOPIC_OUT, key=str(codigo_mesa), payload=evento_ocr)
     db.eventos.insert_one({**evento_ocr, "timestamp": now})
@@ -134,20 +125,31 @@ def main() -> None:
     logger.info("OCR Worker iniciado — escuchando '%s'", TOPIC_IN)
     consumer = _get_consumer()
 
-    for msg in consumer:
-        event   = msg.value
-        id_acta = event.get("id_acta", "?")
-        try:
-            _process(event)
-            consumer.commit()
-        except Exception as exc:
-            logger.error("Error en acta %s: %s", id_acta[:16], exc, exc_info=True)
-            # Enviar al DLQ para no bloquear el pipeline y avanzar el offset
-            emit(TOPIC_DLQ, key=str(event.get("codigo_mesa", "0")), payload={
-                "evento_original": event,
-                "error":           str(exc),
-            })
-            consumer.commit()
+    try:
+        while True:
+            msg = consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                raise KafkaException(msg.error())
+
+            event   = json.loads(msg.value().decode("utf-8"))
+            id_acta = event.get("id_acta", "?")
+
+            try:
+                _process(event)
+                consumer.commit(asynchronous=False)
+            except Exception as exc:
+                logger.error("Error en acta %s: %s", str(id_acta)[:16], exc, exc_info=True)
+                emit(TOPIC_DLQ, key=str(event.get("codigo_mesa", "0")), payload={
+                    "evento_original": event,
+                    "error":           str(exc),
+                })
+                consumer.commit(asynchronous=False)
+    finally:
+        consumer.close()
 
 
 if __name__ == "__main__":

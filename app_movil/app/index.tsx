@@ -1,16 +1,8 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Dimensions, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  withDelay,
-  runOnJS,
-} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors, Typography, Animation } from '../constants/theme';
+import { Colors, Typography } from '../constants/theme';
 import { BoliviaSeal } from '../components/BoliviaSeal';
 import { FlagStripe } from '../components/FlagStripe';
 
@@ -19,34 +11,35 @@ const { width } = Dimensions.get('window');
 export default function SplashScreen() {
   const router = useRouter();
 
-  const sealScale   = useSharedValue(0.3);
-  const sealOpacity = useSharedValue(0);
-  const textOpacity = useSharedValue(0);
-  const textY       = useSharedValue(20);
-  const stripeWidth = useSharedValue(0);
-
-  const sealStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: sealScale.value }],
-    opacity: sealOpacity.value,
-  }));
-
-  const textStyle = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateY: textY.value }],
-  }));
-
-  const stripeStyle = useAnimatedStyle(() => ({
-    width: stripeWidth.value,
-  }));
+  const sealScale   = useRef(new Animated.Value(0.3)).current;
+  const sealOpacity = useRef(new Animated.Value(0)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const textY       = useRef(new Animated.Value(20)).current;
+  const stripeWidth = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    sealOpacity.value = withTiming(1, { duration: Animation.slow });
-    sealScale.value   = withSpring(1, Animation.spring);
+    Animated.parallel([
+      Animated.timing(sealOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(sealScale,   { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
+    ]).start();
 
-    textOpacity.value = withDelay(600, withTiming(1, { duration: Animation.slow }));
-    textY.value       = withDelay(600, withSpring(0, Animation.spring));
+    Animated.sequence([
+      Animated.delay(600),
+      Animated.parallel([
+        Animated.timing(textOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.spring(textY, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+      ]),
+    ]).start();
 
-    stripeWidth.value = withDelay(800, withTiming(width * 0.6, { duration: Animation.slow }));
+    Animated.sequence([
+      Animated.delay(800),
+      Animated.timing(stripeWidth, {
+        toValue: width * 0.6,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
 
     const timer = setTimeout(() => router.replace('/setup'), 2800);
     return () => clearTimeout(timer);
@@ -59,20 +52,19 @@ export default function SplashScreen() {
       end={{ x: 0.7, y: 1 }}
       style={styles.container}
     >
-      {/* Background seal watermark */}
       <View style={styles.watermark} pointerEvents="none">
         <BoliviaSeal size={280} opacity={0.04} />
       </View>
 
-      <Animated.View style={[styles.sealWrapper, sealStyle]}>
+      <Animated.View style={[styles.sealWrapper, { opacity: sealOpacity, transform: [{ scale: sealScale }] }]}>
         <BoliviaSeal size={130} opacity={1} />
       </Animated.View>
 
-      <Animated.View style={[styles.textBlock, textStyle]}>
+      <Animated.View style={[styles.textBlock, { opacity: textOpacity, transform: [{ translateY: textY }] }]}>
         <Text style={styles.title}>RRV Bolivia</Text>
         <Text style={styles.subtitle}>Recuento Rápido de Votos</Text>
 
-        <Animated.View style={[styles.stripeContainer, stripeStyle]}>
+        <Animated.View style={[styles.stripeContainer, { width: stripeWidth }]}>
           <FlagStripe height={3} marginVertical={0} />
         </Animated.View>
 
@@ -114,7 +106,6 @@ const styles = StyleSheet.create({
   },
   stripeContainer: {
     overflow: 'hidden',
-    alignSelf: 'stretch',
     marginVertical: 12,
   },
   caption: {

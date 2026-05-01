@@ -1,15 +1,47 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 .Python
+.pytest_cache/
+.mypy_cache/
 
 # Virtual environment
 venv/
 .venv/
+**/venv/
+**/.venv/
 
 # Environment variables
 .env
+**/.env
+!.env.example
+!**/.env.example
 
 # PaddleOCR models (se descargan en runtime, ~100MB+)
 .paddleocr/
+**/.paddleocr/
+
+# Node / frontend artifacts
+node_modules/
+**/node_modules/
+dist/
+build/
+
+# Runtime logs and local temp files
+*.log
+logs/
+tmp/
+temp/
+
+# Local OCR/model/cache artifacts
+.cache/
+models/
+*.traineddata
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
