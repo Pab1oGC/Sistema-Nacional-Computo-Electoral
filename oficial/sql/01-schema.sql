@@ -1,0 +1,185 @@
+-- ============================================================
+-- 01-schema.sql
+-- Schema oficial: catálogos + actas + log de inconsistencias.
+--
+-- Fuente de verdad del schema PostgreSQL para el módulo Cómputo
+-- Oficial. El ORM (SQLAlchemy 2.0) MIRROR este archivo.
+--
+-- Ejecutar ANTES de aplicar replicación (02-) o cargar datos (04-).
+-- Idempotente: usa CREATE ... IF NOT EXISTS y CREATE ROLE solo si
+-- no existe.
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS oficial;
+
+-- ─── ROLES ─────────────────────────────────────────────────
+-- Passwords aquí matchean los defaults de los env vars en
+-- docker-compose.oficial.yml. En Docker, oficial_writer es creado por
+-- POSTGRES_USER + POSTGRES_PASSWORD del image (esta DO block lo skip via
+-- IF NOT EXISTS). En entornos non-Docker (psql manual), este script
+-- crea las tres roles con los mismos valores que el compose usa por
+-- default.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'oficial_writer') THEN
+        CREATE ROLE oficial_writer LOGIN PASSWORD 'oficial_2025';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_ro') THEN
+        CREATE ROLE dashboard_ro LOGIN PASSWORD 'dash_2025';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'oficial_replicator') THEN
+        CREATE ROLE oficial_replicator REPLICATION LOGIN
+            PASSWORD 'replica_2025';
+    END IF;
+END
+$$;
+
+-- ─── TABLAS (orden topológico de dependencias) ─────────────
+
+-- 1. departamento
+CREATE TABLE IF NOT EXISTS oficial.departamento (
+    codigo  INTEGER PRIMARY KEY,
+    nombre  VARCHAR(60) NOT NULL
+);
+
+-- 2. municipio
+CREATE TABLE IF NOT EXISTS oficial.municipio (
+    codigo               VARCHAR(10) PRIMARY KEY,
+    nombre               VARCHAR(120) NOT NULL,
+    provincia            VARCHAR(120) NOT NULL,
+    codigo_departamento  INTEGER NOT NULL
+        REFERENCES oficial.departamento(codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_municipio_codigo_departamento
+    ON oficial.municipio (codigo_departamento);
+
+-- 3. recinto
+-- codigo_recinto es BIGINT: los códigos OEP en Bolivia siguen el formato
+-- DPMMRRRRRR (10 dígitos, hasta ~9.000.000.000) y exceden el rango de
+-- INTEGER (max 2.147.483.647).
+CREATE TABLE IF NOT EXISTS oficial.recinto (
+    codigo_recinto    BIGINT PRIMARY KEY,
+    nombre            VARCHAR(255) NOT NULL,
+    direccion         VARCHAR(500) NOT NULL,
+    codigo_municipio  VARCHAR(10) NOT NULL
+        REFERENCES oficial.municipio(codigo)
+);
+CREATE INDEX IF NOT EXISTS ix_recinto_codigo_municipio
+    ON oficial.recinto (codigo_municipio);
+
+-- 4. mesa
+-- codigo_recinto BIGINT para matchear el tipo de la PK en recinto.
+CREATE TABLE IF NOT EXISTS oficial.mesa (
+    codigo_mesa          BIGINT PRIMARY KEY,
+    nro_mesa             INTEGER NOT NULL,
+    cantidad_habilitada  INTEGER NOT NULL,
+    codigo_recinto       BIGINT NOT NULL
+        REFERENCES oficial.recinto(codigo_recinto)
+);
+CREATE INDEX IF NOT EXISTS ix_mesa_codigo_recinto
+    ON oficial.mesa (codigo_recinto);
+
+-- 5. partido (catálogo de 4 candidatos, sembrado en 04-carga-datos.sql)
+CREATE TABLE IF NOT EXISTS oficial.partido (
+    id_partido        INTEGER PRIMARY KEY,
+    sigla_candidato   VARCHAR(4) UNIQUE NOT NULL,
+    nombre_candidato  VARCHAR(120) NOT NULL,
+    sigla_partido     VARCHAR(20) NOT NULL,
+    color_hex         VARCHAR(7) NOT NULL,
+    orden_papeleta    INTEGER NOT NULL
+);
+
+-- 6. acta_oficial
+CREATE TABLE IF NOT EXISTS oficial.acta_oficial (
+    id_acta            VARCHAR(80) PRIMARY KEY,
+    codigo_acta        VARCHAR(13) UNIQUE NOT NULL,
+    codigo_mesa        BIGINT NOT NULL
+        REFERENCES oficial.mesa(codigo_mesa),
+    votos_p1           INTEGER NOT NULL,
+    votos_p2           INTEGER NOT NULL,
+    votos_p3           INTEGER NOT NULL,
+    votos_p4           INTEGER NOT NULL,
+    blancos            INTEGER NOT NULL,
+    nulos              INTEGER NOT NULL,
+    habilitados        INTEGER NOT NULL,
+    anfora             INTEGER NOT NULL,
+    no_usadas          INTEGER NOT NULL,
+    apertura_hora      INTEGER,
+    apertura_minutos   INTEGER,
+    cierre_hora        INTEGER,
+    cierre_minutos     INTEGER,
+    fecha_creacion     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_acta_oficial_codigo_acta
+    ON oficial.acta_oficial (codigo_acta);
+CREATE INDEX IF NOT EXISTS ix_acta_oficial_codigo_mesa
+    ON oficial.acta_oficial (codigo_mesa);
+CREATE INDEX IF NOT EXISTS ix_acta_oficial_fecha_creacion_desc
+    ON oficial.acta_oficial (fecha_creacion DESC);
+
+-- 7. log_inconsistencias
+-- CHECK constraint con valores en MAYÚSCULAS (convención del proyecto).
+-- Sin FK a acta_oficial: el log puede persistir inconsistencias de actas
+-- que NO se guardaron (caso típico Error1/Error2: validación falla → no
+-- se guarda el acta, se guarda la inconsistencia).
+CREATE TABLE IF NOT EXISTS oficial.log_inconsistencias (
+    id_inconsistencia  BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    codigo_acta        VARCHAR(13) NOT NULL,
+    codigo_mesa        BIGINT NOT NULL,
+    tipo               VARCHAR(10) NOT NULL,
+    mensaje            VARCHAR(500) NOT NULL,
+    valores_recibidos  JSONB NOT NULL,
+    timestamp          TIMESTAMPTZ NOT NULL,
+    resuelto           BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT log_inconsistencias_tipo_check
+        CHECK (tipo IN ('ERROR1', 'ERROR2', 'ERROR3', 'ERROR4'))
+);
+CREATE INDEX IF NOT EXISTS ix_log_inconsistencias_codigo_acta
+    ON oficial.log_inconsistencias (codigo_acta);
+CREATE INDEX IF NOT EXISTS ix_log_inconsistencias_codigo_mesa
+    ON oficial.log_inconsistencias (codigo_mesa);
+CREATE INDEX IF NOT EXISTS ix_log_inconsistencias_tipo
+    ON oficial.log_inconsistencias (tipo);
+CREATE INDEX IF NOT EXISTS ix_log_inconsistencias_timestamp_desc
+    ON oficial.log_inconsistencias (timestamp DESC);
+
+-- 8. actas_descartadas (cuarentena de audit)
+-- Filas del CSV maestro que NO pueden cargarse al sistema oficial por
+-- inconsistencias referenciales (típicamente CodigoRecinto inexistente
+-- en el catálogo OEP, indicio de error de transcripción en el origen).
+-- Decisión consciente: NO derivar ni inventar datos en un sistema con
+-- valor legal; rechazar y persistir para audit.
+CREATE TABLE IF NOT EXISTS oficial.actas_descartadas (
+    id_descarte         SERIAL PRIMARY KEY,
+    codigo_recinto_csv  TEXT NOT NULL,
+    codigo_acta_csv     TEXT NOT NULL,
+    nro_mesa_csv        TEXT,
+    razon               VARCHAR(200) NOT NULL,
+    timestamp_descarte  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_descartes_razon
+    ON oficial.actas_descartadas (razon);
+
+-- ─── GRANTS ─────────────────────────────────────────────────
+
+-- oficial_writer: full access al schema
+GRANT USAGE ON SCHEMA oficial TO oficial_writer;
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON ALL TABLES IN SCHEMA oficial TO oficial_writer;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA oficial TO oficial_writer;
+ALTER DEFAULT PRIVILEGES IN SCHEMA oficial
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO oficial_writer;
+ALTER DEFAULT PRIVILEGES IN SCHEMA oficial
+    GRANT USAGE, SELECT ON SEQUENCES TO oficial_writer;
+
+-- dashboard_ro: solo SELECT (lectura segura para el dashboard general)
+GRANT USAGE ON SCHEMA oficial TO dashboard_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA oficial TO dashboard_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA oficial
+    GRANT SELECT ON TABLES TO dashboard_ro;
+
+-- oficial_replicator: el privilege REPLICATION está en el rol mismo,
+-- no requiere GRANT adicional.
+
+-- ─── Confirmación ──────────────────────────────────────────
+SELECT 'oficial schema listo. Próximo paso: 02-replication-master.conf' AS status;

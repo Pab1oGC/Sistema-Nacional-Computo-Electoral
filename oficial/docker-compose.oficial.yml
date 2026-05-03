@@ -1,0 +1,206 @@
+# ============================================================
+# docker-compose.oficial.yml
+#
+# Cómputo Oficial: cluster Mirror PostgreSQL síncrono + API +
+# n8n + dashboard propio. Red `rrv-net` compartida con el módulo
+# RRV del team lider (declarada como external).
+#
+# Levantar el módulo (sin dashboard):
+#   docker compose -f docker-compose.oficial.yml up -d
+#
+# Levantar incluyendo dashboard (después del paso 7):
+#   docker compose -f docker-compose.oficial.yml --profile dashboard up -d
+#
+# Precondiciones:
+#   - Red rrv-net existente. Si no, el comando /levantar la crea.
+#   - CSVs en oficial/data/ antes del primer up; si no, el init de
+#     oficial_master falla al procesar 04-carga-datos.sql. Filenames
+#     esperados (generados por exportar_excel_a_csv.py):
+#       - data_distribucionterritorial.csv  (340 filas)
+#       - data_recintoselectorales.csv      (537 filas)
+#       - data_actasimpresas.csv            (5396 filas)
+#       - csv-master.csv                    (5396 filas, lo lee n8n)
+# ============================================================
+
+x-postgres-common: &postgres-common
+  image: postgres:16.6-alpine
+  user: postgres
+  restart: unless-stopped
+  networks:
+    - rrv-net
+
+services:
+
+  # ─────────────────────────────────────────────────────────
+  # PostgreSQL master (primario). Aplicación escribe acá.
+  # ─────────────────────────────────────────────────────────
+  oficial_master:
+    <<: *postgres-common
+    container_name: oficial_master
+    hostname: oficial_master
+    # Importante: NO override del `command:`. Eso rompía el entrypoint
+    # oficial (POSTGRES_DB no se creaba, init scripts nunca corrían).
+    # Los parámetros de replicación se aplican vía ALTER SYSTEM en
+    # sql/00-replication-config.sh, que corre alfabéticamente antes
+    # que 01-schema.sql en /docker-entrypoint-initdb.d/.
+    ports:
+      - "5432:5432"
+    shm_size: 256mb
+    environment:
+      POSTGRES_DB: oficial
+      POSTGRES_USER: oficial_writer
+      POSTGRES_PASSWORD: ${OFICIAL_DB_PASSWORD:-oficial_2025}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - oficial_master_data:/var/lib/postgresql/data
+      # Init hooks. Orden alfabético importa: 00 → 01 → 04.
+      - ./sql/00-replication-config.sh:/docker-entrypoint-initdb.d/00-replication-config.sh:ro
+      - ./sql/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/04-carga-datos.sql:/docker-entrypoint-initdb.d/04-carga-datos.sql:ro
+      # Documentación de referencia (no la consume el server)
+      - ./sql/02-replication-master.conf:/etc/postgresql/replication.conf:ro
+      # CSVs accesibles vía \copy desde 04-carga-datos.sql
+      - ./data:/var/lib/postgresql/csv:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficial_writer -d oficial"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────
+  # PostgreSQL standby síncrono. Acepta queries de solo lectura
+  # (hot standby). El dashboard general puede leer de acá.
+  # ─────────────────────────────────────────────────────────
+  oficial_replica:
+    <<: *postgres-common
+    container_name: oficial_replica
+    hostname: oficial_replica
+    # Custom command: bypassea docker-entrypoint init normal porque
+    # pg_basebackup requiere data dir vacío. La condición standby.signal
+    # evita re-correr pg_basebackup si el contenedor reinicia.
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        until pg_isready -h oficial_master -p 5432 -U oficial_writer -d oficial; do
+          echo "[replica] esperando al master..."
+          sleep 2
+        done
+        if [ ! -f /var/lib/postgresql/data/standby.signal ]; then
+          echo "[replica] standby.signal no existe; corriendo pg_basebackup..."
+          rm -rf /var/lib/postgresql/data/*
+          PGPASSWORD=$$REPLICATION_PASSWORD PGAPPNAME=oficial_replica pg_basebackup \
+            --host=oficial_master \
+            --port=5432 \
+            --pgdata=/var/lib/postgresql/data \
+            --username=oficial_replicator \
+            --wal-method=stream \
+            --progress \
+            --write-recovery-conf
+          chmod 0700 /var/lib/postgresql/data
+          echo "hot_standby = on" >> /var/lib/postgresql/data/postgresql.conf
+          echo "hot_standby_feedback = on" >> /var/lib/postgresql/data/postgresql.conf
+          echo "[replica] basebackup completo. Iniciando standby..."
+        else
+          echo "[replica] standby.signal presente. Iniciando standby existente..."
+        fi
+        exec postgres -D /var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    environment:
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replica_2025}
+    volumes:
+      - oficial_replica_data:/var/lib/postgresql/data
+    depends_on:
+      oficial_master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficial_writer -d oficial"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ─────────────────────────────────────────────────────────
+  # API FastAPI. Escribe contra master, lectura opcional contra
+  # réplica vía DB_URL_REPLICA.
+  # ─────────────────────────────────────────────────────────
+  oficial_api:
+    container_name: oficial_api
+    hostname: oficial_api
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Durante desarrollo "no" para detectar errores rápido. En prod
+    # cambiar a "unless-stopped".
+    restart: "no"
+    ports:
+      - "8001:8000"
+    environment:
+      DB_URL: postgresql+asyncpg://oficial_writer:${OFICIAL_DB_PASSWORD:-oficial_2025}@oficial_master:5432/oficial
+      DB_URL_REPLICA: postgresql+asyncpg://dashboard_ro:${DASHBOARD_RO_PASSWORD:-dash_2025}@oficial_replica:5432/oficial
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      oficial_master:
+        condition: service_healthy
+    networks:
+      - rrv-net
+
+  # ─────────────────────────────────────────────────────────
+  # n8n. Workflow de carga CSV → POST /api/v1/oficial/recuento.
+  # ─────────────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:1.74.1
+    container_name: n8n
+    hostname: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      GENERIC_TIMEZONE: America/La_Paz
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-admin_2025}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+      - ./data:/data:ro
+    networks:
+      - rrv-net
+
+  # ─────────────────────────────────────────────────────────
+  # Dashboard propio (React). NO se levanta por defecto: usar
+  # `--profile dashboard` cuando esté listo (paso 7).
+  # ─────────────────────────────────────────────────────────
+  oficial_dashboard:
+    profiles:
+      - dashboard
+    container_name: oficial_dashboard
+    hostname: oficial_dashboard
+    build:
+      context: ./dashboard-oficial
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5174:5173"
+    environment:
+      VITE_API_URL: http://oficial_api:8000
+    networks:
+      - rrv-net
+
+# ────────────────────────────────────────────────────────────
+volumes:
+  oficial_master_data:
+  oficial_replica_data:
+  n8n_data:
+
+networks:
+  rrv-net:
+    external: true
+    name: rrv-net

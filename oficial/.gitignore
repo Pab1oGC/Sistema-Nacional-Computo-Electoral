@@ -1,0 +1,14 @@
+.env
+.env.local
+.env.*.local
+
+# Volúmenes locales si alguien los crea
+docker-volumes/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+.claude/
