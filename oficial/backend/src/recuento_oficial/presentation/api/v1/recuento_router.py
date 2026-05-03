@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from composition_root import RegistrarUseCaseDep
 from recuento_oficial.domain.exceptions import (
+    ActaNoExisteException,
     ActaYaProcesadaException,
     ErroresDeValidacionException,
 )
@@ -28,6 +29,8 @@ async def registrar_recuento(
 ) -> ActaOficialResponse:
     try:
         acta = await use_case.execute(request.to_dto())
+    except ActaNoExisteException as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ActaYaProcesadaException as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ErroresDeValidacionException as exc:

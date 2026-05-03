@@ -39,6 +39,7 @@ from recuento_oficial.domain.repositories.acta_oficial_repository import (
 from recuento_oficial.domain.repositories.inconsistencia_repository import (
     InconsistenciaRepository,
 )
+from recuento_oficial.domain.repositories.mesa_repository import MesaRepository
 from recuento_oficial.domain.repositories.partido_repository import PartidoRepository
 from recuento_oficial.domain.repositories.replicacion_repository import (
     ReplicacionRepository,
@@ -49,6 +50,9 @@ from recuento_oficial.infrastructure.persistence.repositories.sqla_acta_oficial_
 )
 from recuento_oficial.infrastructure.persistence.repositories.sqla_inconsistencia_repository import (
     SqlaInconsistenciaRepository,
+)
+from recuento_oficial.infrastructure.persistence.repositories.sqla_mesa_repository import (
+    SqlaMesaRepository,
 )
 from recuento_oficial.infrastructure.persistence.repositories.sqla_partido_repository import (
     SqlaPartidoRepository,
@@ -79,20 +83,26 @@ def get_replicacion_repo(session: SessionDep) -> ReplicacionRepository:
     return SqlaReplicacionRepository(session)
 
 
+def get_mesa_repo(session: SessionDep) -> MesaRepository:
+    return SqlaMesaRepository(session)
+
+
 ActaRepoDep = Annotated[ActaOficialRepository, Depends(get_acta_repo)]
 PartidoRepoDep = Annotated[PartidoRepository, Depends(get_partido_repo)]
 InconsistenciaRepoDep = Annotated[
     InconsistenciaRepository, Depends(get_inconsistencia_repo)
 ]
 ReplicacionRepoDep = Annotated[ReplicacionRepository, Depends(get_replicacion_repo)]
+MesaRepoDep = Annotated[MesaRepository, Depends(get_mesa_repo)]
 
 
 # ─── Use case providers ───────────────────────────────────────────────────
 def get_registrar_use_case(
     acta_repo: ActaRepoDep,
+    mesa_repo: MesaRepoDep,
     inc_repo: InconsistenciaRepoDep,
 ) -> RegistrarRecuentoUseCase:
-    return RegistrarRecuentoUseCase(acta_repo, inc_repo, ValidadorActa())
+    return RegistrarRecuentoUseCase(acta_repo, mesa_repo, inc_repo, ValidadorActa())
 
 
 def get_consultar_resultados_use_case(

@@ -167,10 +167,15 @@ services:
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-admin_2025}
+      # URL del API y path del CSV — leídas por el Set "Configuración"
+      # del workflow con fallback a defaults si no están seteadas.
+      API_URL_OFICIAL: http://oficial_api:8000
+      CSV_PATH: /data/csv-master.csv
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n:/workflows:ro
-      - ./data:/data:ro
+      - ./data:/data:ro          # input read-only (catálogos + master)
+      - ./n8n/output:/output     # output writable (resultados del workflow)
     networks:
       - rrv-net
 

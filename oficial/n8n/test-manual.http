@@ -1,0 +1,155 @@
+### Pruebas manuales del endpoint POST /api/v1/oficial/recuento
+###
+### Para usar: instalá la extensión "REST Client" de VS Code (humao.rest-client)
+### y hacé click en "Send Request" arriba de cada bloque.
+###
+### El API debe estar corriendo en http://localhost:8001 (mapeado desde
+### oficial_api:8000 en docker-compose.oficial.yml).
+
+@base = http://localhost:8001
+
+### 1. Health check
+GET {{base}}/health
+
+### 2. Listar candidatos (catálogo de 4 partidos)
+GET {{base}}/api/v1/oficial/candidatos
+
+### 3. Avance del cómputo
+GET {{base}}/api/v1/oficial/avance
+
+### 4. Resultados agregados
+GET {{base}}/api/v1/oficial/resultados
+
+### 5. Estado de replicación master ↔ replica
+GET {{base}}/api/v1/oficial/replicacion/estado
+
+### ----------------------------------------------------------------
+### POST /recuento — happy path con el acta ground truth (1010200001001)
+### Datos reales del Excel del docente.
+### Esperado: 201 Created.
+###
+### Si re-ejecutás esto con la misma acta, vas a ver 409 (Error4 idempotente).
+### ----------------------------------------------------------------
+
+### 6. POST recuento OK (acta consistente)
+POST {{base}}/api/v1/oficial/recuento
+Content-Type: application/json
+
+{
+  "codigo_acta": "1010200001001",
+  "codigo_mesa": 1010200001001,
+  "votos_p1": 140,
+  "votos_p2": 39,
+  "votos_p3": 124,
+  "votos_p4": 345,
+  "blancos": 76,
+  "nulos": 64,
+  "habilitados": 877,
+  "anfora": 788,
+  "no_usadas": 89,
+  "apertura_hora": 8,
+  "apertura_minutos": 1,
+  "cierre_hora": 16,
+  "cierre_minutos": 4
+}
+
+### 7. POST recuento DUPLICADO (esperado 409, Error4 idempotente)
+### Mandá el mismo body que el anterior una segunda vez.
+POST {{base}}/api/v1/oficial/recuento
+Content-Type: application/json
+
+{
+  "codigo_acta": "1010200001001",
+  "codigo_mesa": 1010200001001,
+  "votos_p1": 140,
+  "votos_p2": 39,
+  "votos_p3": 124,
+  "votos_p4": 345,
+  "blancos": 76,
+  "nulos": 64,
+  "habilitados": 877,
+  "anfora": 788,
+  "no_usadas": 89,
+  "apertura_hora": 8,
+  "apertura_minutos": 1,
+  "cierre_hora": 16,
+  "cierre_minutos": 4
+}
+
+### 8. POST recuento con ERROR1 (papeletas no balancean)
+### habilitados=877, anfora=788, no_usadas=88 → 788+88=876 ≠ 877 (diff +1)
+### codigo_acta distinto para evitar Error4.
+### Esperado: 422 con mensaje "Son 877 ciudadanos, hay 788 papeletas
+### en el ánfora y 88 papeletas no usadas, hay una diferencia de +1 papeletas"
+POST {{base}}/api/v1/oficial/recuento
+Content-Type: application/json
+
+{
+  "codigo_acta": "9999999999991",
+  "codigo_mesa": 9999999999991,
+  "votos_p1": 140,
+  "votos_p2": 39,
+  "votos_p3": 124,
+  "votos_p4": 345,
+  "blancos": 76,
+  "nulos": 64,
+  "habilitados": 877,
+  "anfora": 788,
+  "no_usadas": 88
+}
+
+### 9. POST recuento con ERROR2 (votos no cuadran con ánfora)
+### blancos=75 en lugar de 76 → 648+75+64=787 ≠ 788 (diff -1)
+### Esperado: 422 con mensaje "Son 648 votos por partidos, 75 votos blancos
+### y 64 votos nulos no inciden con la cantidad de boletas en el ánfora -1"
+POST {{base}}/api/v1/oficial/recuento
+Content-Type: application/json
+
+{
+  "codigo_acta": "9999999999992",
+  "codigo_mesa": 9999999999992,
+  "votos_p1": 140,
+  "votos_p2": 39,
+  "votos_p3": 124,
+  "votos_p4": 345,
+  "blancos": 75,
+  "nulos": 64,
+  "habilitados": 877,
+  "anfora": 788,
+  "no_usadas": 89
+}
+
+### 10. POST recuento con codigo_acta MAL FORMATEADO (esperado 422 de Pydantic)
+### codigo_acta de 12 dígitos viola el regex ^\d{13}$
+POST {{base}}/api/v1/oficial/recuento
+Content-Type: application/json
+
+{
+  "codigo_acta": "999999999999",
+  "codigo_mesa": 999999999999,
+  "votos_p1": 0,
+  "votos_p2": 0,
+  "votos_p3": 0,
+  "votos_p4": 0,
+  "blancos": 0,
+  "nulos": 0,
+  "habilitados": 100,
+  "anfora": 100,
+  "no_usadas": 0
+}
+
+### ----------------------------------------------------------------
+### Consultas auxiliares para verificar la BD después de POSTear
+### ----------------------------------------------------------------
+
+### 11. Listar inconsistencias (lo que la API persistió en log_inconsistencias)
+GET {{base}}/api/v1/oficial/inconsistencias?limit=50
+
+### 12. Listar las primeras 10 actas
+GET {{base}}/api/v1/oficial/actas?page=1&limit=10
+
+### 13. Buscar una acta por codigo_acta (la del happy path)
+GET {{base}}/api/v1/oficial/actas/1010200001001
+
+### 14. Listar inconsistencias filtradas por tipo (ERROR1)
+GET {{base}}/api/v1/oficial/inconsistencias?tipo=ERROR1

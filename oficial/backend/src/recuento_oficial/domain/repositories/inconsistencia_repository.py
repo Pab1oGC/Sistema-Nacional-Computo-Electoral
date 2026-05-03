@@ -25,6 +25,21 @@ class Inconsistencia:
 class InconsistenciaRepository(Protocol):
     async def save(self, inc: Inconsistencia) -> None: ...
 
+    async def commit_pendiente(self) -> None:
+        """Commit explícito de las inconsistencias guardadas con `save`.
+
+        Este método es una excepción consciente al patrón Unit of Work:
+        normalmente la gestión transaccional vive solo en `get_session()`
+        del shared. Pero el audit trail de inconsistencias DEBE persistir
+        incluso cuando la request termina con error (404, 422), porque
+        en un sistema oficial "rejection without audit" es inaceptable.
+
+        El trade-off: ligera ruptura del patrón a cambio de garantía
+        audit-completa. Aceptable en este caso por el dominio (datos
+        electorales legalmente vinculantes).
+        """
+        ...
+
     async def list(
         self,
         tipo: str | None = None,

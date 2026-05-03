@@ -26,6 +26,29 @@ class SqlaInconsistenciaRepository:
         self._session.add(orm)
         await self._session.flush()
 
+    async def commit_pendiente(self) -> None:
+        """Commit explícito de la inconsistencia para que sobreviva al
+        rollback automático que `get_session()` ejecuta cuando el use
+        case lanza una excepción de dominio.
+
+        Este método es una excepción consciente al patrón Unit of Work:
+        normalmente la gestión transaccional vive solo en
+        `get_session()`. Pero el audit trail de inconsistencias DEBE
+        persistir incluso cuando la request termina con error (404,
+        422), porque en un sistema oficial "rejection without audit" es
+        inaceptable.
+
+        El trade-off: ligera ruptura del patrón a cambio de garantía
+        audit-completa. Aceptable en este caso por el dominio (datos
+        electorales legalmente vinculantes).
+
+        Efecto colateral: tras este commit la sesión queda sin
+        transacción abierta. El `rollback()` posterior de
+        `get_session()` (al manejar la excepción del use case) será
+        no-op sobre la inconsistencia ya persistida.
+        """
+        await self._session.commit()
+
     async def list(
         self,
         tipo: str | None = None,

@@ -1,0 +1,354 @@
+{
+  "name": "Carga CSV maestro → API Cómputo Oficial",
+  "nodes": [
+    {
+      "id": "n01-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 240],
+      "parameters": {}
+    },
+    {
+      "id": "n02-schedule",
+      "name": "Schedule Trigger (5min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 440],
+      "disabled": true,
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 5 }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n03-config",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 340],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-csv-path",
+              "name": "csv_path",
+              "value": "={{ $env.CSV_PATH || '/data/csv-master.csv' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-api-url",
+              "name": "api_url",
+              "value": "={{ ($env.API_URL_OFICIAL || 'http://oficial_api:8000') + '/api/v1/oficial/recuento' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-batch-size",
+              "name": "batch_size",
+              "value": 50,
+              "type": "number"
+            },
+            {
+              "id": "cfg-output-path",
+              "name": "output_path",
+              "value": "/output/n8n-resultados.json",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n04-read",
+      "name": "Leer csv-master",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [680, 340],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $json.csv_path }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n05-extract",
+      "name": "Parsear CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [900, 340],
+      "parameters": {
+        "operation": "csv",
+        "options": {
+          "headerRow": true,
+          "delimiter": ","
+        }
+      }
+    },
+    {
+      "id": "n06-validar",
+      "name": "Validar y construir body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 340],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const TYPO_NO_USADAS = 'PapeltasNoUtilizadas';\nconst CODIGO_ACTA_RE = /^\\d{13}$/;\n\nfunction toInt(s) {\n  if (s === undefined || s === null) return null;\n  const t = String(s).trim();\n  if (t === '') return null;\n  const v = parseFloat(t);\n  if (Number.isNaN(v)) return null;\n  return parseInt(v, 10);\n}\n\nconst out = [];\nconst items = $input.all();\n\nfor (let idx = 0; idx < items.length; idx++) {\n  const row = items[idx].json;\n  const reasons = [];\n  const csvRowNumber = idx + 2;\n\n  const codigoActaInt = toInt(row.CodigoActa);\n  let codigoActaStr;\n  if (codigoActaInt === null) {\n    reasons.push('CodigoActa no parseable');\n    codigoActaStr = '0000000000000';\n  } else {\n    codigoActaStr = String(codigoActaInt);\n    if (!CODIGO_ACTA_RE.test(codigoActaStr)) {\n      reasons.push('CodigoActa no tiene 13 dígitos: ' + codigoActaStr);\n    }\n  }\n\n  const habilitados = toInt(row.VotantesHabilitados);\n  if (habilitados === null) reasons.push('VotantesHabilitados no parseable');\n  else if (habilitados <= 0) reasons.push('VotantesHabilitados <= 0: ' + habilitados);\n\n  const intFields = {\n    votos_p1: toInt(row.P1),\n    votos_p2: toInt(row.P2),\n    votos_p3: toInt(row.P3),\n    votos_p4: toInt(row.P4),\n    blancos: toInt(row.VotosBlancos),\n    nulos: toInt(row.VotosNulos),\n    anfora: toInt(row.PapeletasAnfora),\n    no_usadas: toInt(row[TYPO_NO_USADAS]),\n  };\n  for (const [key, val] of Object.entries(intFields)) {\n    if (val === null) reasons.push(key + ' no parseable');\n  }\n\n  const isInvalid = reasons.length > 0;\n\n  const body = {\n    codigo_acta: codigoActaStr,\n    codigo_mesa: codigoActaInt === null ? 0 : codigoActaInt,\n    votos_p1: intFields.votos_p1 === null ? 0 : intFields.votos_p1,\n    votos_p2: intFields.votos_p2 === null ? 0 : intFields.votos_p2,\n    votos_p3: intFields.votos_p3 === null ? 0 : intFields.votos_p3,\n    votos_p4: intFields.votos_p4 === null ? 0 : intFields.votos_p4,\n    blancos: intFields.blancos === null ? 0 : intFields.blancos,\n    nulos: intFields.nulos === null ? 0 : intFields.nulos,\n    habilitados: habilitados === null || habilitados <= 0 ? 1 : habilitados,\n    anfora: intFields.anfora === null ? 0 : intFields.anfora,\n    no_usadas: intFields.no_usadas === null ? 0 : intFields.no_usadas,\n  };\n\n  const ah = toInt(row.AperturaHora);\n  if (ah !== null) body.apertura_hora = ah;\n  const am = toInt(row.AperturaMinutos);\n  if (am !== null) body.apertura_minutos = am;\n  const ch = toInt(row.CierreHora);\n  if (ch !== null) body.cierre_hora = ch;\n  const cm = toInt(row.CierreMinutos);\n  if (cm !== null) body.cierre_minutos = cm;\n\n  out.push({\n    json: {\n      body: body,\n      _invalid_local: isInvalid,\n      _razones_pre_api: reasons,\n      _csv_row_number: csvRowNumber,\n      codigo_acta_csv: row.CodigoActa,\n    },\n  });\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "n07-split",
+      "name": "Lotes de 50",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1340, 340],
+      "parameters": {
+        "batchSize": 50,
+        "options": {}
+      }
+    },
+    {
+      "id": "n08-http",
+      "name": "POST /recuento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 340],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').first().json.api_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "retry": {
+            "tryCount": 3,
+            "waitBetween": 2000
+          }
+        }
+      }
+    },
+    {
+      "id": "n09-if",
+      "name": "¿Status 2xx?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 340],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "if-cond-1",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": { "type": "number", "operation": "gte" }
+            },
+            {
+              "id": "if-cond-2",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": { "type": "number", "operation": "lt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n10-set-ok",
+      "name": "Resumen exitosos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2000, 240],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok-codigo",
+              "name": "codigo_acta",
+              "value": "={{ $('Validar y construir body').item.json.body.codigo_acta }}",
+              "type": "string"
+            },
+            {
+              "id": "ok-status",
+              "name": "status",
+              "value": "OK",
+              "type": "string"
+            },
+            {
+              "id": "ok-categoria",
+              "name": "_categoria_error",
+              "value": "OK",
+              "type": "string"
+            },
+            {
+              "id": "ok-row",
+              "name": "_csv_row_number",
+              "value": "={{ $('Validar y construir body').item.json._csv_row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "ok-status-code",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n11-set-rechazados",
+      "name": "Resumen rechazados",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2000, 440],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "err-codigo",
+              "name": "codigo_acta",
+              "value": "={{ $('Validar y construir body').item.json.body.codigo_acta }}",
+              "type": "string"
+            },
+            {
+              "id": "err-status",
+              "name": "status",
+              "value": "ERROR",
+              "type": "string"
+            },
+            {
+              "id": "err-categoria",
+              "name": "_categoria_error",
+              "value": "={{ $('Validar y construir body').item.json._invalid_local ? 'INVALIDO_PRE_API' : ($json.statusCode === 409 ? 'DUPLICADO_IDEMPOTENTE' : ($json.statusCode === 404 ? 'ERROR_REFERENCIAL' : ($json.statusCode === 422 && JSON.stringify($json.body || {}).indexOf('papeletas no usadas') >= 0 ? 'ERROR_VALIDACION_ERROR1' : ($json.statusCode === 422 && JSON.stringify($json.body || {}).indexOf('votos por partidos') >= 0 ? 'ERROR_VALIDACION_ERROR2' : ($json.statusCode >= 500 ? 'ERROR_HTTP_SERVIDOR' : 'ERROR_OTRO'))))) }}",
+              "type": "string"
+            },
+            {
+              "id": "err-row",
+              "name": "_csv_row_number",
+              "value": "={{ $('Validar y construir body').item.json._csv_row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "err-status-code",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            },
+            {
+              "id": "err-razon-api",
+              "name": "razon_api",
+              "value": "={{ JSON.stringify($json.body) }}",
+              "type": "string"
+            },
+            {
+              "id": "err-razones-pre",
+              "name": "razones_pre_api",
+              "value": "={{ JSON.stringify($('Validar y construir body').item.json._razones_pre_api) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n12-reporte",
+      "name": "Generar reporte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 340],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst total = items.length;\nlet ok = 0;\nconst porCategoria = {};\nfor (const item of items) {\n  const cat = item.json._categoria_error || 'DESCONOCIDO';\n  porCategoria[cat] = (porCategoria[cat] || 0) + 1;\n  if (cat === 'OK') ok++;\n}\nconst rechazados = total - ok;\n\nconst summary = {\n  timestamp: new Date().toISOString(),\n  workflow_run_id: $execution.id,\n  total: total,\n  ok: ok,\n  rechazados: rechazados,\n  por_categoria: porCategoria,\n  items: items.map(function (i) { return i.json; }),\n};\n\nconst jsonStr = JSON.stringify(summary, null, 2);\n\nreturn [{\n  json: summary,\n  binary: {\n    data: {\n      data: Buffer.from(jsonStr, 'utf8').toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'n8n-resultados.json',\n    },\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "n13-write",
+      "name": "Escribir n8n-resultados.json",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [2440, 340],
+      "parameters": {
+        "operation": "write",
+        "fileSelector": "={{ $('Configuración').first().json.output_path }}",
+        "dataPropertyName": "data",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Configuración", "type": "main", "index": 0 }]]
+    },
+    "Schedule Trigger (5min)": {
+      "main": [[{ "node": "Configuración", "type": "main", "index": 0 }]]
+    },
+    "Configuración": {
+      "main": [[{ "node": "Leer csv-master", "type": "main", "index": 0 }]]
+    },
+    "Leer csv-master": {
+      "main": [[{ "node": "Parsear CSV", "type": "main", "index": 0 }]]
+    },
+    "Parsear CSV": {
+      "main": [[{ "node": "Validar y construir body", "type": "main", "index": 0 }]]
+    },
+    "Validar y construir body": {
+      "main": [[{ "node": "Lotes de 50", "type": "main", "index": 0 }]]
+    },
+    "Lotes de 50": {
+      "main": [[{ "node": "POST /recuento", "type": "main", "index": 0 }]]
+    },
+    "POST /recuento": {
+      "main": [[{ "node": "¿Status 2xx?", "type": "main", "index": 0 }]]
+    },
+    "¿Status 2xx?": {
+      "main": [
+        [{ "node": "Resumen exitosos", "type": "main", "index": 0 }],
+        [{ "node": "Resumen rechazados", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resumen exitosos": {
+      "main": [[{ "node": "Generar reporte", "type": "main", "index": 0 }]]
+    },
+    "Resumen rechazados": {
+      "main": [[{ "node": "Generar reporte", "type": "main", "index": 0 }]]
+    },
+    "Generar reporte": {
+      "main": [[{ "node": "Escribir n8n-resultados.json", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "oficial-csv-loader",
+  "versionId": "1"
+}

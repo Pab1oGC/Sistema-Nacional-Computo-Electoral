@@ -9,11 +9,24 @@ class FakeInconsistenciaRepository:
     def __init__(self) -> None:
         self._store: list[Inconsistencia] = []
         self._next_id = 1
+        self._commits_invocados = 0
 
     async def save(self, inc: Inconsistencia) -> None:
         inc.id_inconsistencia = self._next_id
         self._next_id += 1
         self._store.append(inc)
+
+    async def commit_pendiente(self) -> None:
+        """No-op en memoria: no hay transacciones que confirmar.
+
+        Mantenemos un contador para que tests puedan asertar que el use
+        case llamó al método (verificación contractual con el repository
+        SQLAlchemy real).
+        """
+        self._commits_invocados += 1
+
+    def get_commits_count(self) -> int:
+        return self._commits_invocados
 
     async def list(
         self,
