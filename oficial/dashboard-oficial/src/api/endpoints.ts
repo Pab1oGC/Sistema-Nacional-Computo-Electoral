@@ -5,6 +5,7 @@ import type {
   HealthResponse,
   ListaInconsistenciasResponse,
   ResultadosPorDepartamentoResponse,
+  ResultadosPorMunicipioResponse,
   ResultadosResponse,
 } from '../types/api';
 
@@ -23,6 +24,16 @@ export async function getAvance(): Promise<AvanceResponse> {
 export async function getResultadosPorDepartamento(): Promise<ResultadosPorDepartamentoResponse> {
   const { data } = await apiClient.get<ResultadosPorDepartamentoResponse>(
     '/api/v1/oficial/resultados/por-departamento',
+  );
+  return data;
+}
+
+export async function getResultadosPorMunicipio(
+  codigoDepartamento: number,
+): Promise<ResultadosPorMunicipioResponse> {
+  const { data } = await apiClient.get<ResultadosPorMunicipioResponse>(
+    '/api/v1/oficial/resultados/por-municipio',
+    { params: { departamento: codigoDepartamento } },
   );
   return data;
 }

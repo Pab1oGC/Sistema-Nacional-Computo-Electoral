@@ -33,6 +33,13 @@ export default defineConfig({
             return 'recharts';
           }
           if (
+            id.indexOf('/leaflet/') !== -1 ||
+            id.indexOf('react-leaflet') !== -1 ||
+            id.indexOf('@react-leaflet') !== -1
+          ) {
+            return 'leaflet';
+          }
+          if (
             id.indexOf('/react/') !== -1 ||
             id.indexOf('/react-dom/') !== -1 ||
             id.indexOf('/scheduler/') !== -1

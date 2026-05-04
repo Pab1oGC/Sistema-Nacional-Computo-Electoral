@@ -13,6 +13,12 @@ const VisualizacionesGraficas = lazy(() =>
   })),
 );
 
+const MapaBolivia = lazy(() =>
+  import('./components/MapaBolivia').then((m) => ({
+    default: m.MapaBolivia,
+  })),
+);
+
 function VisualizacionesSkeleton(): JSX.Element {
   return (
     <section aria-labelledby="visualizaciones-titulo">
@@ -21,6 +27,20 @@ function VisualizacionesSkeleton(): JSX.Element {
       </h2>
       <div
         className="bg-oficial-card border border-oficial-border rounded-lg h-[500px] animate-pulse"
+        aria-hidden="true"
+      />
+    </section>
+  );
+}
+
+function MapaSkeleton(): JSX.Element {
+  return (
+    <section aria-labelledby="mapa-titulo">
+      <h2 id="mapa-titulo" className="text-lg font-semibold mb-4">
+        Mapa Electoral de Bolivia
+      </h2>
+      <div
+        className="bg-oficial-card border border-oficial-border rounded-lg h-[700px] animate-pulse"
         aria-hidden="true"
       />
     </section>
@@ -36,6 +56,9 @@ function App() {
         <AvanceComputo />
         <Suspense fallback={<VisualizacionesSkeleton />}>
           <VisualizacionesGraficas />
+        </Suspense>
+        <Suspense fallback={<MapaSkeleton />}>
+          <MapaBolivia />
         </Suspense>
         <ResultadosPorDepartamento />
         <PanelTransparencia />

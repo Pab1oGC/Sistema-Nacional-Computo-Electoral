@@ -62,6 +62,44 @@ export interface ResultadosPorDepartamentoResponse {
   departamentos: DepartamentoResultados[];
 }
 
+// ─── /resultados/por-municipio?departamento=N ─────────────────
+
+export interface CandidatoVotosMunicipio {
+  sigla_candidato: string;
+  votos: number;
+  porcentaje: number;
+}
+
+export interface GanadorMunicipio {
+  sigla_candidato: string;
+  nombre_candidato: string;
+  sigla_partido: string;
+  color_hex: string;
+  votos: number;
+  porcentaje: number;
+}
+
+export interface MunicipioResultados {
+  id_municipio: number;
+  codigo_municipio: string;
+  nombre_municipio: string;
+  total_mesas_municipio: number;
+  actas_validadas_municipio: number;
+  porcentaje_avance_municipio: number;
+  ganador: GanadorMunicipio | null;
+  resultados_candidatos: CandidatoVotosMunicipio[];
+}
+
+export interface DepartamentoBrief {
+  codigo: number;
+  nombre: string;
+}
+
+export interface ResultadosPorMunicipioResponse {
+  departamento: DepartamentoBrief;
+  municipios: MunicipioResultados[];
+}
+
 // ─── /inconsistencias ─────────────────────────────────────────
 
 export interface InconsistenciaItem {
