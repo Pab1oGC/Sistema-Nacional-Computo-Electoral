@@ -6,6 +6,7 @@ export function useResultadosPorMunicipio(codigoDepartamento: number | null) {
     queryKey: ['resultados-por-municipio', codigoDepartamento],
     queryFn: () => getResultadosPorMunicipio(codigoDepartamento as number),
     enabled: codigoDepartamento !== null,
-    staleTime: 60_000,
+    refetchInterval: 5000,
+    staleTime: 0,
   });
 }

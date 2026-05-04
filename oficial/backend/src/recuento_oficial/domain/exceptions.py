@@ -49,3 +49,19 @@ class DepartamentoNoExisteException(DominioException):
         super().__init__(
             f"El departamento con código {codigo} no existe en el catálogo OEP"
         )
+
+
+class InconsistenciaNumericaException(DominioException):
+    """El acta contiene valores numéricos imposibles (e.g. votos negativos).
+
+    Distinto de ErroresDeValidacionException (Error1/Error2) en que ese
+    cubre desbalances aritméticos entre cuentas que entre sí son válidas.
+    Esta excepción cubre valores estructuralmente imposibles: votos < 0,
+    blancos < 0, etc. La presentación responde 400 con tipo
+    INCONSISTENCIA_NUMERICA y el use case persiste un audit log con ese
+    tipo en oficial.log_inconsistencias.
+    """
+
+    def __init__(self, detalle: str) -> None:
+        self.detalle = detalle
+        super().__init__(detalle)

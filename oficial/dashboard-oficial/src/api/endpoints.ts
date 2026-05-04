@@ -6,6 +6,7 @@ import type {
   ListaInconsistenciasResponse,
   ResultadosPorDepartamentoResponse,
   ResultadosPorMunicipioResponse,
+  ResultadosPorProvinciaResponse,
   ResultadosResponse,
 } from '../types/api';
 
@@ -24,6 +25,16 @@ export async function getAvance(): Promise<AvanceResponse> {
 export async function getResultadosPorDepartamento(): Promise<ResultadosPorDepartamentoResponse> {
   const { data } = await apiClient.get<ResultadosPorDepartamentoResponse>(
     '/api/v1/oficial/resultados/por-departamento',
+  );
+  return data;
+}
+
+export async function getResultadosPorProvincia(
+  codigoDepartamento: number,
+): Promise<ResultadosPorProvinciaResponse> {
+  const { data } = await apiClient.get<ResultadosPorProvinciaResponse>(
+    '/api/v1/oficial/resultados/por-provincia',
+    { params: { departamento: codigoDepartamento } },
   );
   return data;
 }

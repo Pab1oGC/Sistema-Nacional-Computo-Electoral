@@ -62,6 +62,38 @@ export interface ResultadosPorDepartamentoResponse {
   departamentos: DepartamentoResultados[];
 }
 
+// ─── /resultados/por-provincia?departamento=N ─────────────────
+
+export interface CandidatoVotosProvincia {
+  sigla_candidato: string;
+  votos: number;
+  porcentaje: number;
+}
+
+export interface GanadorProvincia {
+  sigla_candidato: string;
+  nombre_candidato: string;
+  sigla_partido: string;
+  color_hex: string;
+  votos: number;
+  porcentaje: number;
+}
+
+export interface ProvinciaResultados {
+  codigo_provincia: string;
+  nombre_provincia: string;
+  total_mesas_provincia: number;
+  actas_validadas_provincia: number;
+  porcentaje_avance_provincia: number;
+  ganador: GanadorProvincia | null;
+  resultados_candidatos: CandidatoVotosProvincia[];
+}
+
+export interface ResultadosPorProvinciaResponse {
+  departamento: DepartamentoBrief;
+  provincias: ProvinciaResultados[];
+}
+
 // ─── /resultados/por-municipio?departamento=N ─────────────────
 
 export interface CandidatoVotosMunicipio {

@@ -8,6 +8,7 @@ from recuento_oficial.domain.exceptions import (
     ActaNoExisteException,
     ActaYaProcesadaException,
     ErroresDeValidacionException,
+    InconsistenciaNumericaException,
 )
 from recuento_oficial.presentation.schemas.acta_oficial_schemas import (
     ActaOficialResponse,
@@ -29,6 +30,16 @@ async def registrar_recuento(
 ) -> ActaOficialResponse:
     try:
         acta = await use_case.execute(request.to_dto())
+    except InconsistenciaNumericaException as exc:
+        # 400 con tipo explícito para que el cliente (n8n, frontend) pueda
+        # categorizar sin parsear texto libre.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "tipo": "INCONSISTENCIA_NUMERICA",
+                "detail": str(exc),
+            },
+        ) from exc
     except ActaNoExisteException as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ActaYaProcesadaException as exc:

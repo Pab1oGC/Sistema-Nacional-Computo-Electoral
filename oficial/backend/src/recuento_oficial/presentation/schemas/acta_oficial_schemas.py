@@ -32,12 +32,17 @@ class RegistrarRecuentoRequest(BaseModel):
 
     codigo_acta: int = Field(ge=10**12, le=10**13 - 1)  # 13 dígitos exactos
     codigo_mesa: int = Field(gt=0)
-    votos_p1: int = Field(ge=0)
-    votos_p2: int = Field(ge=0)
-    votos_p3: int = Field(ge=0)
-    votos_p4: int = Field(ge=0)
-    blancos: int = Field(ge=0)
-    nulos: int = Field(ge=0)
+    # Pydantic valida solo FORMA del payload (tipos, rangos sin sentido).
+    # La regla de negocio "votos no pueden ser negativos" se aplica en el
+    # use case y se persiste como INCONSISTENCIA_NUMERICA en log_inconsistencias
+    # para mantener trazabilidad/audit. Si rechazáramos en Pydantic con ge=0,
+    # el use case nunca correría y no habría rastro en BD.
+    votos_p1: int
+    votos_p2: int
+    votos_p3: int
+    votos_p4: int
+    blancos: int
+    nulos: int
     habilitados: int = Field(gt=0)
     anfora: int = Field(ge=0)
     no_usadas: int = Field(ge=0)

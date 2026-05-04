@@ -16,6 +16,7 @@ from recuento_oficial.domain.exceptions import (
     ActaNoExisteException,
     ActaYaProcesadaException,
     ErroresDeValidacionException,
+    InconsistenciaNumericaException,
 )
 from recuento_oficial.domain.services.validador_acta import ValidadorActa
 from tests.unit.fakes.fake_acta_oficial_repository import FakeActaOficialRepository
@@ -151,3 +152,30 @@ class TestRegistrarRecuentoUseCase:
             await use_case.execute(dto)
 
         assert inc_repo.get_commits_count() == 1
+
+    async def test_votos_negativos_lanza_inconsistencia_numerica(self) -> None:
+        # Pydantic deja pasar valores negativos (la regla es de negocio).
+        # El use case detecta y persiste como INCONSISTENCIA_NUMERICA.
+        use_case, acta_repo, inc_repo, _ = _build_use_case()
+        dto = _build_dto(votos_p4=-5, votos_p2=-1)
+
+        with pytest.raises(InconsistenciaNumericaException) as exc:
+            await use_case.execute(dto)
+
+        # Mensaje informativo con campos y valores
+        assert "votos_p4=-5" in str(exc.value)
+        assert "votos_p2=-1" in str(exc.value)
+
+        # NO se persistió el acta (FK válido pero valores imposibles)
+        assert not await acta_repo.exists_by_codigo(dto.codigo_acta)
+        # SÍ se persistió un audit log con tipo INCONSISTENCIA_NUMERICA
+        assert await inc_repo.count(tipo="INCONSISTENCIA_NUMERICA") == 1
+        # Y se invocó commit explícito antes del raise
+        assert inc_repo.get_commits_count() == 1
+
+    async def test_acta_normal_sigue_funcionando(self) -> None:
+        # Smoke: confirmar que el cambio no rompe el happy path.
+        use_case, _, _, _ = _build_use_case()
+        dto = _build_dto()
+        acta = await use_case.execute(dto)
+        assert acta.codigo_acta == 1010200001001

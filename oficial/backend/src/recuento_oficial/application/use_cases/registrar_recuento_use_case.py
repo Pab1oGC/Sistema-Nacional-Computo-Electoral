@@ -9,6 +9,7 @@ from recuento_oficial.domain.exceptions import (
     ActaNoExisteException,
     ActaYaProcesadaException,
     ErroresDeValidacionException,
+    InconsistenciaNumericaException,
 )
 from recuento_oficial.domain.repositories.acta_oficial_repository import (
     ActaOficialRepository,
@@ -37,11 +38,11 @@ class RegistrarRecuentoUseCase:
         self._validador = validador
 
     async def execute(self, dto: RegistrarRecuentoDTO) -> ActaOficial:
-        # Orden: Error3 → Error4 → Error1+2.
-        # Fail fast desde lo estructural (mesa no existe en el catálogo)
-        # a lo aritmético (papeletas no balancean). Si la mesa no existe,
-        # ni siquiera tiene sentido chequear duplicados ni validar cuentas:
-        # toda la cadena de FK estaría rota.
+        # Orden: INCONSISTENCIA_NUMERICA → Error3 → Error4 → Error1+2.
+        # Pydantic valida FORMA del payload (tipos correctos). La regla de
+        # negocio "votos no negativos" la aplicamos acá para poder persistir
+        # un audit trail completo en log_inconsistencias.
+        await self._validar_no_negativos(dto)
 
         # Error3: ¿la mesa existe en oficial.mesa?
         if not await self._mesa_repo.existe(dto.codigo_mesa):
@@ -88,6 +89,63 @@ class RegistrarRecuentoUseCase:
 
         await self._repo.save(acta)
         return acta
+
+    async def _validar_no_negativos(self, dto: RegistrarRecuentoDTO) -> None:
+        """Detecta votos negativos en el DTO. Si los hay, persiste un
+        registro INCONSISTENCIA_NUMERICA en log_inconsistencias y lanza
+        InconsistenciaNumericaException.
+
+        Cubre el caso del CSV de transcripciones del docente, que tiene
+        ~178 actas con votos negativos en alguno de los campos. Sin esta
+        validación, esas actas serían rechazadas por Pydantic con 422 pero
+        no quedaría rastro en BD.
+        """
+        negativos: list[tuple[str, int]] = []
+        for campo in (
+            "votos_p1", "votos_p2", "votos_p3", "votos_p4",
+            "blancos", "nulos",
+        ):
+            valor = getattr(dto, campo)
+            if valor < 0:
+                negativos.append((campo, valor))
+        if not negativos:
+            return
+
+        detalle = "Votos negativos detectados: " + ", ".join(
+            f"{k}={v}" for k, v in negativos
+        )
+        valores: dict[str, int | str] = {
+            "codigo_acta": dto.codigo_acta,
+            "codigo_mesa": dto.codigo_mesa,
+            "habilitados": dto.habilitados,
+            "anfora": dto.anfora,
+            "no_usadas": dto.no_usadas,
+            "votos_p1": dto.votos_p1,
+            "votos_p2": dto.votos_p2,
+            "votos_p3": dto.votos_p3,
+            "votos_p4": dto.votos_p4,
+            "blancos": dto.blancos,
+            "nulos": dto.nulos,
+        }
+        try:
+            await self._inconsistencias.save(
+                Inconsistencia(
+                    codigo_acta=str(dto.codigo_acta),
+                    codigo_mesa=dto.codigo_mesa,
+                    tipo="INCONSISTENCIA_NUMERICA",
+                    mensaje=detalle,
+                    valores_recibidos=valores,
+                    timestamp=datetime.now(timezone.utc),
+                )
+            )
+            await self._inconsistencias.commit_pendiente()
+        except Exception as exc:
+            logger.warning(
+                "No se pudo persistir INCONSISTENCIA_NUMERICA para acta %s: %s",
+                dto.codigo_acta,
+                exc,
+            )
+        raise InconsistenciaNumericaException(detalle)
 
     async def _persistir_error3(
         self, dto: RegistrarRecuentoDTO, mensaje: str
