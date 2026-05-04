@@ -29,13 +29,21 @@ class SqlaInconsistenciaRepository:
             cod_acta_int = int(inc.codigo_acta)
         except (TypeError, ValueError):
             cod_acta_int = 0
+        # La columna oficial.log_inconsistencias.fecha es TIMESTAMP WITHOUT
+        # TIME ZONE (schema v2). asyncpg rechaza datetime tz-aware contra
+        # columnas naive. Normalizamos a naive UTC en el adapter.
+        fecha = (
+            inc.timestamp.replace(tzinfo=None)
+            if inc.timestamp.tzinfo is not None
+            else inc.timestamp
+        )
         orm = InconsistenciaORM(
             codigo_acta_intentado=cod_acta_int,
             codigo_mesa_intentado=inc.codigo_mesa,
             tipo=inc.tipo,
             detalle=inc.mensaje,
             payload_json=inc.valores_recibidos,
-            fecha=inc.timestamp,
+            fecha=fecha,
         )
         self._session.add(orm)
         await self._session.flush()

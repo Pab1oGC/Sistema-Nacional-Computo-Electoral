@@ -43,6 +43,9 @@ export default defineConfig({
                     if (id.indexOf('@tanstack/react-query') !== -1) {
                         return 'query';
                     }
+                    if (id.indexOf('papaparse') !== -1) {
+                        return 'papaparse';
+                    }
                     return undefined;
                 },
             },
