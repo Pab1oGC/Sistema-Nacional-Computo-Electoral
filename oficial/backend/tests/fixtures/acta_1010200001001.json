@@ -1,6 +1,6 @@
 {
-  "codigo_acta": "1010200001001",
-  "codigo_mesa": 35000,
+  "codigo_acta": 1010200001001,
+  "codigo_mesa": 1010200001001,
   "votos_p1": 140,
   "votos_p2": 39,
   "votos_p3": 124,
@@ -9,9 +9,5 @@
   "nulos": 64,
   "habilitados": 877,
   "anfora": 788,
-  "no_usadas": 89,
-  "apertura_hora": 8,
-  "apertura_minutos": 1,
-  "cierre_hora": 16,
-  "cierre_minutos": 4
+  "no_usadas": 89
 }

@@ -46,8 +46,13 @@ class ConsultarActaUseCase:
     def __init__(self, repo: ActaOficialRepository) -> None:
         self._repo = repo
 
-    async def execute(self, codigo_acta: str) -> ActaOficial:
-        acta = await self._repo.get_by_codigo(codigo_acta)
+    async def execute(self, codigo_acta: str | int) -> ActaOficial:
+        # Acepta str (path param de URL) o int. Schema v2 guarda BIGINT.
+        try:
+            codigo_int = int(codigo_acta)
+        except (TypeError, ValueError) as exc:
+            raise ActaNoExisteException(str(codigo_acta)) from exc
+        acta = await self._repo.get_by_codigo(codigo_int)
         if acta is None:
-            raise ActaNoExisteException(codigo_acta)
+            raise ActaNoExisteException(str(codigo_acta))
         return acta

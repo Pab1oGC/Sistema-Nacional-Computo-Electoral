@@ -58,3 +58,10 @@ class FakeInconsistenciaRepository:
             return None
         counter = Counter(i.tipo for i in self._store)
         return counter.most_common(1)[0][0]
+
+    async def count_all(self) -> int:
+        return len(self._store)
+
+    async def truncate_all(self) -> None:
+        self._store.clear()
+        self._next_id = 1

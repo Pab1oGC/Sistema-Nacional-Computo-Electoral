@@ -45,7 +45,7 @@ class RegistrarRecuentoUseCase:
 
         # Error3: ¿la mesa existe en oficial.mesa?
         if not await self._mesa_repo.existe(dto.codigo_mesa):
-            exc = ActaNoExisteException(dto.codigo_acta)
+            exc = ActaNoExisteException(str(dto.codigo_acta))
             await self._persistir_error3(dto, str(exc))
             # Commit explícito ANTES del raise: el rollback automático de
             # FastAPI al excepcionar destruiría el INSERT al
@@ -54,12 +54,11 @@ class RegistrarRecuentoUseCase:
             await self._inconsistencias.commit_pendiente()
             raise exc
 
-        # Error4: idempotencia (id_acta = hash determinista del contenido)
-        if await self._repo.exists(dto.id_acta):
-            raise ActaYaProcesadaException(dto.codigo_acta)
+        # Error4: idempotencia basada en UNIQUE(codigo_acta) del schema v2.
+        if await self._repo.exists_by_codigo(dto.codigo_acta):
+            raise ActaYaProcesadaException(str(dto.codigo_acta))
 
         acta = ActaOficial(
-            id_acta=dto.id_acta,
             codigo_acta=dto.codigo_acta,
             codigo_mesa=dto.codigo_mesa,
             votos_p1=dto.votos_p1,
@@ -71,10 +70,8 @@ class RegistrarRecuentoUseCase:
             habilitados=dto.habilitados,
             anfora=dto.anfora,
             no_usadas=dto.no_usadas,
-            apertura_hora=dto.apertura_hora,
-            apertura_minutos=dto.apertura_minutos,
-            cierre_hora=dto.cierre_hora,
-            cierre_minutos=dto.cierre_minutos,
+            observacion_formal=dto.observacion_formal,
+            tipo_observacion_formal=dto.tipo_observacion_formal,
         )
 
         # Error1+Error2: aritmética (puro, sin BD)
@@ -117,7 +114,7 @@ class RegistrarRecuentoUseCase:
             }
             await self._inconsistencias.save(
                 Inconsistencia(
-                    codigo_acta=dto.codigo_acta,
+                    codigo_acta=str(dto.codigo_acta),
                     codigo_mesa=dto.codigo_mesa,
                     tipo="ERROR3",
                     mensaje=mensaje,
@@ -151,7 +148,7 @@ class RegistrarRecuentoUseCase:
             tipo = self._clasificar_tipo(mensaje)
             await self._inconsistencias.save(
                 Inconsistencia(
-                    codigo_acta=acta.codigo_acta,
+                    codigo_acta=str(acta.codigo_acta),
                     codigo_mesa=acta.codigo_mesa,
                     tipo=tipo,
                     mensaje=mensaje,
@@ -163,7 +160,7 @@ class RegistrarRecuentoUseCase:
     @staticmethod
     def _clasificar_tipo(mensaje: str) -> str:
         # MAYÚSCULAS para matchear el CHECK constraint de
-        # oficial.log_inconsistencias.tipo (ver sql/01-schema.sql).
+        # oficial.log_inconsistencias.tipo (ver sql/01-schema-v2.sql).
         if "papeletas no usadas" in mensaje:
             return "ERROR1"
         return "ERROR2"

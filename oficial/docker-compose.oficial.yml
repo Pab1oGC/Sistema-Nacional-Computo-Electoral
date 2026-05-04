@@ -143,6 +143,11 @@ services:
       DB_URL: postgresql+asyncpg://oficial_writer:${OFICIAL_DB_PASSWORD:-oficial_2025}@oficial_master:5432/oficial
       DB_URL_REPLICA: postgresql+asyncpg://dashboard_ro:${DASHBOARD_RO_PASSWORD:-dash_2025}@oficial_replica:5432/oficial
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Habilita el endpoint POST /api/v1/oficial/admin/reset-actas para
+      # que n8n pueda alternar perfiles de carga durante la demo. En
+      # producción real iría en "false" y el reset se haría con psql
+      # directo bajo control humano.
+      ADMIN_RESET_ENABLED: ${ADMIN_RESET_ENABLED:-true}
     depends_on:
       oficial_master:
         condition: service_healthy

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from recuento_oficial.presentation.api.v1.actas_router import router as actas_router
+from recuento_oficial.presentation.api.v1.admin_router import router as admin_router
 from recuento_oficial.presentation.api.v1.avance_router import router as avance_router
 from recuento_oficial.presentation.api.v1.candidatos_router import (
     router as candidatos_router,
@@ -73,3 +74,4 @@ app.include_router(actas_router)
 app.include_router(inconsistencias_router)
 app.include_router(candidatos_router)
 app.include_router(replicacion_router)
+app.include_router(admin_router)

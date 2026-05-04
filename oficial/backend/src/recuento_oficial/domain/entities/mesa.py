@@ -5,5 +5,5 @@ from dataclasses import dataclass
 class Mesa:
     codigo_mesa: int
     nro_mesa: int
-    cantidad_habilitada: int
+    votantes_habilitados: int
     codigo_recinto: int

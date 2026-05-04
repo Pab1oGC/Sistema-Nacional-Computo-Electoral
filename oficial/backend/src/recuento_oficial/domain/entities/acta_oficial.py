@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -8,10 +10,17 @@ class ActaOficial:
 
     Fuente de verdad legal del recuento. Persiste en PostgreSQL con
     replicación síncrona (RPO=0).
+
+    Schema v2:
+    - id_acta es BIGSERIAL: None antes del INSERT, BD lo asigna.
+    - codigo_acta es BIGINT (13 dígitos numéricos).
+    - codigo_mesa es BIGINT (13 dígitos numéricos).
+    - Campos apertura_hora/cierre_hora removidos del schema.
+    - observacion_formal + tipo_observacion_formal son nuevos.
+    - fecha_creacion → fecha_procesado.
     """
 
-    id_acta: str
-    codigo_acta: str
+    codigo_acta: int
     codigo_mesa: int
     votos_p1: int
     votos_p2: int
@@ -22,11 +31,10 @@ class ActaOficial:
     habilitados: int
     anfora: int
     no_usadas: int
-    apertura_hora: int | None = None
-    apertura_minutos: int | None = None
-    cierre_hora: int | None = None
-    cierre_minutos: int | None = None
-    fecha_creacion: datetime = field(
+    id_acta: int | None = None
+    observacion_formal: str | None = None
+    tipo_observacion_formal: str | None = None
+    fecha_procesado: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
 

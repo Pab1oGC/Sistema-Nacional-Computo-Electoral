@@ -1,0 +1,370 @@
+{
+  "name": "Carga transcripciones v2 — 5 perfiles + truncate opcional",
+  "nodes": [
+    {
+      "id": "n01-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [120, 340],
+      "parameters": {}
+    },
+    {
+      "id": "n02-perfil",
+      "name": "Set Perfil",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [320, 340],
+      "notes": "EDITAR ACÁ: cambiar perfil_seleccionado a uno de [lento_demo, demo, medio, rapido, express] y truncar_antes a true/false según corresponda. Este nodo es el panel de control de la corrida.",
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "perfil-seleccionado",
+              "name": "perfil_seleccionado",
+              "value": "medio",
+              "type": "string"
+            },
+            {
+              "id": "truncar-antes",
+              "name": "truncar_antes",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n03-config",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 340],
+      "notes": "Mapea el perfil_seleccionado a (batch_size, wait_ms) y agrega URLs y output_path con timestamp. Si el perfil no existe, throw para fallar fast.",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const perfiles = {\n  lento_demo: { batch_size: 1,   wait_ms: 1000, descripcion: 'Demo MUY lenta - 1 acta cada segundo, ~1.5h para 5351 actas' },\n  demo:       { batch_size: 5,   wait_ms: 500,  descripcion: 'Demo en vivo - ~10 min, ves dashboard actualizar' },\n  medio:      { batch_size: 25,  wait_ms: 200,  descripcion: 'Defensa estandar - ~2 min' },\n  rapido:     { batch_size: 100, wait_ms: 0,    descripcion: 'Validacion - ~30 seg' },\n  express:    { batch_size: 500, wait_ms: 0,    descripcion: 'Test maximo throughput - ~10 seg' }\n};\n\nconst input = $input.first().json;\nconst perfilName = input.perfil_seleccionado || 'medio';\nconst perfil = perfiles[perfilName];\n\nif (!perfil) {\n  throw new Error('Perfil desconocido: ' + perfilName + '. Validos: ' + Object.keys(perfiles).join(', '));\n}\n\nconst timestamp = new Date().toISOString().replace(/[:.]/g, '-');\n\nreturn [{ json: {\n  csv_path: '/output/transcripciones.csv',\n  api_url: 'http://oficial_api:8000/api/v1/oficial/recuento',\n  reset_url: 'http://oficial_api:8000/api/v1/oficial/admin/reset-actas?confirm=YES_DELETE_ALL',\n  batch_size: perfil.batch_size,\n  wait_ms: perfil.wait_ms,\n  output_path: '/output/reporte-v2-' + perfilName + '-' + timestamp + '.json',\n  perfil_activo: perfilName,\n  perfil_descripcion: perfil.descripcion,\n  truncar_antes: input.truncar_antes === true,\n  timestamp_inicio: new Date().toISOString()\n}}];\n"
+      }
+    },
+    {
+      "id": "n04-if-truncar",
+      "name": "IF Truncar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 340],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "truncar-cond",
+              "leftValue": "={{ $json.truncar_antes }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n05-reset",
+      "name": "POST Reset Actas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 240],
+      "notes": "Solo se ejecuta si truncar_antes=true. Llama al endpoint admin protegido por confirm=YES_DELETE_ALL y la env var ADMIN_RESET_ENABLED.",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').first().json.reset_url }}",
+        "sendBody": false,
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "n06-read",
+      "name": "Leer transcripciones.csv",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1120, 340],
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "={{ $('Configuración').first().json.csv_path }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n07-extract",
+      "name": "Parsear CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [1320, 340],
+      "parameters": {
+        "operation": "csv",
+        "options": {
+          "headerRow": true,
+          "delimiter": ","
+        }
+      }
+    },
+    {
+      "id": "n08-validar",
+      "name": "Validar y construir body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 340],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Schema v2 del CSV: columnas en snake_case que ya coinciden con el\n// payload del backend (sin apertura/cierre, con observacion_formal y\n// tipo_observacion_formal). Defensa en profundidad: filtramos terminadores\n// '0000000' aunque el extractor de CSVs ya los filtra.\n\nconst CODIGO_ACTA_RE = /^\\d{13}$/;\nconst TIPOS_OBS_VALIDOS = new Set([\n  'FALTA_DATOS_APERTURA_CIERRE',\n  'MESA_LUGAR_DISTINTO',\n  'USO_FORMULARIOS_NO_OFICIALES',\n  'PAPELETAS_NO_AUTORIZADAS',\n  'AUSENCIA_DELEGADOS',\n  'FECHA_INCORRECTA',\n  'ERRORES_TRANSCRIPCION',\n  'FALTA_FIRMAS_HUELLAS',\n  'INCONSISTENCIA_ARITMETICA',\n]);\n\nfunction toInt(s) {\n  if (s === undefined || s === null) return null;\n  const t = String(s).trim();\n  if (t === '') return null;\n  const v = parseFloat(t);\n  if (Number.isNaN(v)) return null;\n  return parseInt(v, 10);\n}\n\nfunction normalizarObs(s) {\n  if (s === undefined || s === null) return null;\n  const t = String(s).trim();\n  return t === '' ? null : t;\n}\n\nfunction normalizarTipoObs(s) {\n  const t = normalizarObs(s);\n  if (t === null) return null;\n  return TIPOS_OBS_VALIDOS.has(t) ? t : null;\n}\n\nconst out = [];\nconst items = $input.all();\n\nfor (let idx = 0; idx < items.length; idx++) {\n  const row = items[idx].json;\n  const reasons = [];\n  const csvRowNumber = idx + 2;\n\n  const codigoActaInt = toInt(row.codigo_acta);\n  let codigoActaStr;\n  if (codigoActaInt === null) {\n    reasons.push('codigo_acta no parseable');\n    codigoActaStr = '0000000000000';\n  } else {\n    codigoActaStr = String(codigoActaInt);\n    if (!CODIGO_ACTA_RE.test(codigoActaStr)) {\n      reasons.push('codigo_acta no tiene 13 dígitos: ' + codigoActaStr);\n    }\n    if (codigoActaStr.endsWith('0000000')) {\n      reasons.push('codigo_acta terminador 0000000 (placeholder del docente)');\n    }\n  }\n\n  const codigoMesaInt = toInt(row.codigo_mesa);\n  if (codigoMesaInt === null) reasons.push('codigo_mesa no parseable');\n\n  const habilitados = toInt(row.habilitados);\n  if (habilitados === null) reasons.push('habilitados no parseable');\n  else if (habilitados <= 0) reasons.push('habilitados <= 0: ' + habilitados);\n\n  const intFields = {\n    votos_p1: toInt(row.votos_p1),\n    votos_p2: toInt(row.votos_p2),\n    votos_p3: toInt(row.votos_p3),\n    votos_p4: toInt(row.votos_p4),\n    blancos: toInt(row.blancos),\n    nulos: toInt(row.nulos),\n    anfora: toInt(row.anfora),\n    no_usadas: toInt(row.no_usadas),\n  };\n  for (const [key, val] of Object.entries(intFields)) {\n    if (val === null) reasons.push(key + ' no parseable');\n  }\n\n  const obsFormal = normalizarObs(row.observacion_formal);\n  const tipoObsFormal = normalizarTipoObs(row.tipo_observacion_formal);\n\n  const isInvalid = reasons.length > 0;\n\n  const body = {\n    codigo_acta: codigoActaInt === null ? 0 : codigoActaInt,\n    codigo_mesa: codigoMesaInt === null ? 0 : codigoMesaInt,\n    votos_p1: intFields.votos_p1 === null ? 0 : intFields.votos_p1,\n    votos_p2: intFields.votos_p2 === null ? 0 : intFields.votos_p2,\n    votos_p3: intFields.votos_p3 === null ? 0 : intFields.votos_p3,\n    votos_p4: intFields.votos_p4 === null ? 0 : intFields.votos_p4,\n    blancos: intFields.blancos === null ? 0 : intFields.blancos,\n    nulos: intFields.nulos === null ? 0 : intFields.nulos,\n    habilitados: habilitados === null || habilitados <= 0 ? 1 : habilitados,\n    anfora: intFields.anfora === null ? 0 : intFields.anfora,\n    no_usadas: intFields.no_usadas === null ? 0 : intFields.no_usadas,\n  };\n  if (obsFormal !== null) body.observacion_formal = obsFormal;\n  if (tipoObsFormal !== null) body.tipo_observacion_formal = tipoObsFormal;\n\n  out.push({\n    json: {\n      body: body,\n      _invalid_local: isInvalid,\n      _razones_pre_api: reasons,\n      _csv_row_number: csvRowNumber,\n      codigo_acta_csv: row.codigo_acta,\n    },\n  });\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "id": "n09-split",
+      "name": "Split en lotes (perfil)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1720, 340],
+      "parameters": {
+        "batchSize": "={{ $('Configuración').first().json.batch_size }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n10-http",
+      "name": "POST /recuento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1920, 340],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuración').first().json.api_url }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "retry": {
+            "tryCount": 3,
+            "waitBetween": 2000
+          }
+        }
+      }
+    },
+    {
+      "id": "n11-wait",
+      "name": "Wait según perfil",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [2120, 340],
+      "notes": "Pausa entre batches según wait_ms del perfil. wait_ms=0 → pasa inmediato.",
+      "parameters": {
+        "amount": "={{ $('Configuración').first().json.wait_ms }}",
+        "unit": "ms"
+      }
+    },
+    {
+      "id": "n12-if",
+      "name": "¿Status 2xx?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2320, 340],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "if-cond-1",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": { "type": "number", "operation": "gte" }
+            },
+            {
+              "id": "if-cond-2",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": { "type": "number", "operation": "lt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n13-set-ok",
+      "name": "Resumen exitosos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2520, 240],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok-codigo",
+              "name": "codigo_acta",
+              "value": "={{ $('Validar y construir body').item.json.body.codigo_acta }}",
+              "type": "number"
+            },
+            {
+              "id": "ok-status",
+              "name": "status",
+              "value": "OK",
+              "type": "string"
+            },
+            {
+              "id": "ok-categoria",
+              "name": "_categoria_error",
+              "value": "INSERT_OK",
+              "type": "string"
+            },
+            {
+              "id": "ok-row",
+              "name": "_csv_row_number",
+              "value": "={{ $('Validar y construir body').item.json._csv_row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "ok-status-code",
+              "name": "statusCode",
+              "value": "={{ $json.statusCode }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "n14-set-rechazados",
+      "name": "Resumen rechazados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2520, 440],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Categorización defensiva basada en el comportamiento real del backend\n// (recuento_router.py):\n//   201 → INSERT_OK            (manejado en la rama OK)\n//   404 → ERROR3               (mesa no existe en oficial.mesa)\n//   409 → IDEMPOTENT_REPEAT    (Error4: codigo_acta UNIQUE ya presente)\n//   422 con detail array       → ERROR1 o ERROR2 según texto\n//   422 con detail dict/Pydantic → INCONSISTENCIA_NUMERICA\n//                                  (ej: votos negativos rechazados por Field(ge=0))\n//   5xx → ERROR_INFRA\n//   otros → UNKNOWN_STATUS_<n>\n\nconst statusCode = $json.statusCode || 0;\nconst body = $json.body || {};\nconst bodyStr = JSON.stringify(body);\nconst codigoActa = $('Validar y construir body').item.json.body.codigo_acta;\nconst rowNumber = $('Validar y construir body').item.json._csv_row_number;\nconst razonesPreApi = $('Validar y construir body').item.json._razones_pre_api;\nconst invalidLocal = $('Validar y construir body').item.json._invalid_local;\n\nlet categoria;\nlet tipo_error = null;\n\nif (invalidLocal) {\n  categoria = 'INVALIDO_PRE_API';\n} else if (statusCode === 404) {\n  categoria = 'ERROR3_MESA_NO_EXISTE';\n  tipo_error = 'ERROR3';\n} else if (statusCode === 409) {\n  categoria = 'IDEMPOTENT_REPEAT';\n  tipo_error = 'ERROR4';\n} else if (statusCode === 422) {\n  const detail = body.detail;\n  let isPydantic = false;\n  if (Array.isArray(detail) && detail.length > 0 && typeof detail[0] === 'object') {\n    isPydantic = true;\n  }\n  if (isPydantic) {\n    categoria = 'INCONSISTENCIA_NUMERICA';\n    tipo_error = 'INCONSISTENCIA_NUMERICA';\n  } else if (bodyStr.indexOf('papeletas no usadas') >= 0) {\n    categoria = 'ERROR1_BALANCE_PAPELETAS';\n    tipo_error = 'ERROR1';\n  } else if (bodyStr.indexOf('votos por partidos') >= 0 || bodyStr.indexOf('cantidad de boletas en el ánfora') >= 0) {\n    categoria = 'ERROR2_BALANCE_VOTOS';\n    tipo_error = 'ERROR2';\n  } else {\n    categoria = 'ERROR_VALIDACION_OTRO';\n  }\n} else if (statusCode >= 500) {\n  categoria = 'ERROR_INFRA';\n} else {\n  categoria = 'UNKNOWN_STATUS_' + statusCode;\n}\n\nreturn {\n  json: {\n    codigo_acta: codigoActa,\n    status: 'ERROR',\n    _categoria_error: categoria,\n    tipo_error: tipo_error,\n    _csv_row_number: rowNumber,\n    statusCode: statusCode,\n    razon_api: bodyStr,\n    razones_pre_api: JSON.stringify(razonesPreApi),\n  }\n};\n"
+      }
+    },
+    {
+      "id": "n15-reporte",
+      "name": "Generar reporte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2720, 340],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst total = items.length;\nlet ok = 0;\nconst porCategoria = {};\nconst ejemplosPorCategoria = {};\nfor (const item of items) {\n  const cat = item.json._categoria_error || 'DESCONOCIDO';\n  porCategoria[cat] = (porCategoria[cat] || 0) + 1;\n  if (cat === 'INSERT_OK') ok++;\n  if (cat !== 'INSERT_OK') {\n    if (!ejemplosPorCategoria[cat]) ejemplosPorCategoria[cat] = [];\n    if (ejemplosPorCategoria[cat].length < 3) {\n      ejemplosPorCategoria[cat].push({\n        codigo_acta: item.json.codigo_acta,\n        statusCode: item.json.statusCode,\n        razon_api: item.json.razon_api,\n      });\n    }\n  }\n}\nconst rechazados = total - ok;\n\nconst cfg = $('Configuración').first().json;\nconst inicio = cfg.timestamp_inicio;\nconst ahora = new Date().toISOString();\nconst duracionSeg = (new Date(ahora).getTime() - new Date(inicio).getTime()) / 1000;\n\nconst summary = {\n  schema_version: 'v2',\n  perfil_activo: cfg.perfil_activo,\n  perfil_descripcion: cfg.perfil_descripcion,\n  batch_size_usado: cfg.batch_size,\n  wait_ms_usado: cfg.wait_ms,\n  truncar_se_ejecuto: cfg.truncar_antes === true,\n  timestamp_inicio: inicio,\n  timestamp_fin: ahora,\n  duracion_total_seg: Math.round(duracionSeg * 100) / 100,\n  workflow_run_id: $execution.id,\n  total: total,\n  ok: ok,\n  rechazados: rechazados,\n  por_categoria: porCategoria,\n  ejemplos_por_categoria: ejemplosPorCategoria,\n  items: items.map(function (i) { return i.json; }),\n};\n\nconst jsonStr = JSON.stringify(summary, null, 2);\n\nreturn [{\n  json: summary,\n  binary: {\n    data: {\n      data: Buffer.from(jsonStr, 'utf8').toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'reporte-v2.json',\n    },\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "n16-write",
+      "name": "Escribir reporte",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [2920, 340],
+      "parameters": {
+        "operation": "write",
+        "fileSelector": "={{ $('Configuración').first().json.output_path }}",
+        "dataPropertyName": "data",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set Perfil", "type": "main", "index": 0 }]]
+    },
+    "Set Perfil": {
+      "main": [[{ "node": "Configuración", "type": "main", "index": 0 }]]
+    },
+    "Configuración": {
+      "main": [[{ "node": "IF Truncar?", "type": "main", "index": 0 }]]
+    },
+    "IF Truncar?": {
+      "main": [
+        [{ "node": "POST Reset Actas", "type": "main", "index": 0 }],
+        [{ "node": "Leer transcripciones.csv", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST Reset Actas": {
+      "main": [[{ "node": "Leer transcripciones.csv", "type": "main", "index": 0 }]]
+    },
+    "Leer transcripciones.csv": {
+      "main": [[{ "node": "Parsear CSV", "type": "main", "index": 0 }]]
+    },
+    "Parsear CSV": {
+      "main": [[{ "node": "Validar y construir body", "type": "main", "index": 0 }]]
+    },
+    "Validar y construir body": {
+      "main": [[{ "node": "Split en lotes (perfil)", "type": "main", "index": 0 }]]
+    },
+    "Split en lotes (perfil)": {
+      "main": [[{ "node": "POST /recuento", "type": "main", "index": 0 }]]
+    },
+    "POST /recuento": {
+      "main": [[{ "node": "Wait según perfil", "type": "main", "index": 0 }]]
+    },
+    "Wait según perfil": {
+      "main": [[{ "node": "¿Status 2xx?", "type": "main", "index": 0 }]]
+    },
+    "¿Status 2xx?": {
+      "main": [
+        [{ "node": "Resumen exitosos", "type": "main", "index": 0 }],
+        [{ "node": "Resumen rechazados", "type": "main", "index": 0 }]
+      ]
+    },
+    "Resumen exitosos": {
+      "main": [[{ "node": "Generar reporte", "type": "main", "index": 0 }]]
+    },
+    "Resumen rechazados": {
+      "main": [[{ "node": "Generar reporte", "type": "main", "index": 0 }]]
+    },
+    "Generar reporte": {
+      "main": [[{ "node": "Escribir reporte", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "oficial-csv-loader-v2",
+  "versionId": "2-perfiles"
+}

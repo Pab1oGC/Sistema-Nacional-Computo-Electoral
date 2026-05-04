@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recuento_oficial.domain.repositories.inconsistencia_repository import (
@@ -10,18 +10,32 @@ from recuento_oficial.infrastructure.persistence.models.inconsistencia_orm impor
 
 
 class SqlaInconsistenciaRepository:
+    """Persistencia de inconsistencias en oficial.log_inconsistencias (v2).
+
+    Las columnas en BD se renombraron entre v1 y v2 (ver inconsistencia_orm).
+    El entity Inconsistencia mantiene los nombres lógicos del dominio
+    (codigo_acta, codigo_mesa, mensaje, valores_recibidos, timestamp,
+    resuelto). La traducción entity↔ORM ocurre acá.
+    """
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def save(self, inc: Inconsistencia) -> None:
+        # codigo_acta es str a nivel de dominio (id legible). En v2 la
+        # columna es BIGINT: si parsea como entero lo guardamos como tal,
+        # si no, queda 0 como sentinel y el detalle preserva el texto.
+        try:
+            cod_acta_int = int(inc.codigo_acta)
+        except (TypeError, ValueError):
+            cod_acta_int = 0
         orm = InconsistenciaORM(
-            codigo_acta=inc.codigo_acta,
-            codigo_mesa=inc.codigo_mesa,
+            codigo_acta_intentado=cod_acta_int,
+            codigo_mesa_intentado=inc.codigo_mesa,
             tipo=inc.tipo,
-            mensaje=inc.mensaje,
-            valores_recibidos=inc.valores_recibidos,
-            timestamp=inc.timestamp,
-            resuelto=inc.resuelto,
+            detalle=inc.mensaje,
+            payload_json=inc.valores_recibidos,
+            fecha=inc.timestamp,
         )
         self._session.add(orm)
         await self._session.flush()
@@ -37,15 +51,6 @@ class SqlaInconsistenciaRepository:
         persistir incluso cuando la request termina con error (404,
         422), porque en un sistema oficial "rejection without audit" es
         inaceptable.
-
-        El trade-off: ligera ruptura del patrón a cambio de garantía
-        audit-completa. Aceptable en este caso por el dominio (datos
-        electorales legalmente vinculantes).
-
-        Efecto colateral: tras este commit la sesión queda sin
-        transacción abierta. El `rollback()` posterior de
-        `get_session()` (al manejar la excepción del use case) será
-        no-op sobre la inconsistencia ya persistida.
         """
         await self._session.commit()
 
@@ -57,7 +62,7 @@ class SqlaInconsistenciaRepository:
         limit: int = 20,
     ) -> list[Inconsistencia]:
         stmt = self._build_query(tipo, codigo_mesa)
-        stmt = stmt.order_by(InconsistenciaORM.timestamp.desc())
+        stmt = stmt.order_by(InconsistenciaORM.fecha.desc())
         stmt = stmt.offset((page - 1) * limit).limit(limit)
         rows = (await self._session.execute(stmt)).scalars().all()
         return [self._orm_to_entity(o) for o in rows]
@@ -68,6 +73,16 @@ class SqlaInconsistenciaRepository:
         stmt = self._build_query(tipo, codigo_mesa)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         return int((await self._session.execute(count_stmt)).scalar() or 0)
+
+    async def count_all(self) -> int:
+        stmt = select(func.count()).select_from(InconsistenciaORM)
+        return int((await self._session.execute(stmt)).scalar() or 0)
+
+    async def truncate_all(self) -> None:
+        await self._session.execute(
+            text("TRUNCATE TABLE oficial.log_inconsistencias RESTART IDENTITY")
+        )
+        await self._session.commit()
 
     async def tipo_mas_comun(self) -> str | None:
         """Consulta 20 del enunciado: error más común en verificación."""
@@ -87,18 +102,22 @@ class SqlaInconsistenciaRepository:
         if tipo is not None:
             stmt = stmt.where(InconsistenciaORM.tipo == tipo)
         if codigo_mesa is not None:
-            stmt = stmt.where(InconsistenciaORM.codigo_mesa == codigo_mesa)
+            stmt = stmt.where(InconsistenciaORM.codigo_mesa_intentado == codigo_mesa)
         return stmt
 
     @staticmethod
     def _orm_to_entity(orm: InconsistenciaORM) -> Inconsistencia:
+        # Schema v2 no tiene columna `resuelto` ni `id_inconsistencia` con
+        # ese nombre — usamos id_log como id_inconsistencia y resuelto=False
+        # por defecto (el dominio aún expone el flag para compat con el
+        # endpoint, pero ya no se persiste).
         return Inconsistencia(
-            id_inconsistencia=orm.id_inconsistencia,
-            codigo_acta=orm.codigo_acta,
-            codigo_mesa=orm.codigo_mesa,
+            id_inconsistencia=orm.id_log,
+            codigo_acta=str(orm.codigo_acta_intentado),
+            codigo_mesa=orm.codigo_mesa_intentado or 0,
             tipo=orm.tipo,
-            mensaje=orm.mensaje,
-            valores_recibidos=dict(orm.valores_recibidos),
-            timestamp=orm.timestamp,
-            resuelto=orm.resuelto,
+            mensaje=orm.detalle,
+            valores_recibidos=dict(orm.payload_json or {}),
+            timestamp=orm.fecha,
+            resuelto=False,
         )

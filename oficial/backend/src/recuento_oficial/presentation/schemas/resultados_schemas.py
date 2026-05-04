@@ -110,3 +110,44 @@ class ResultadosPorMunicipioResponse(BaseModel):
 
     departamento: DepartamentoBriefResponse
     municipios: list[MunicipioResultadosResponse]
+
+
+# ─── /resultados/por-provincia?departamento=N ──────────────────────────
+
+
+class CandidatoVotosProvinciaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sigla_candidato: str
+    votos: int
+    porcentaje: float
+
+
+class GanadorProvinciaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sigla_candidato: str
+    nombre_candidato: str
+    sigla_partido: str
+    color_hex: str
+    votos: int
+    porcentaje: float
+
+
+class ProvinciaResultadosResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo_provincia: str
+    nombre_provincia: str
+    total_mesas_provincia: int
+    actas_validadas_provincia: int
+    porcentaje_avance_provincia: float
+    ganador: GanadorProvinciaResponse | None
+    resultados_candidatos: list[CandidatoVotosProvinciaResponse]
+
+
+class ResultadosPorProvinciaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    departamento: DepartamentoBriefResponse
+    provincias: list[ProvinciaResultadosResponse]

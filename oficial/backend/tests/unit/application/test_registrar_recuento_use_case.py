@@ -25,16 +25,16 @@ from tests.unit.fakes.fake_inconsistencia_repository import (
 from tests.unit.fakes.fake_mesa_repository import FakeMesaRepository
 
 
-def _build_dto(**overrides: int | str) -> RegistrarRecuentoDTO:
+def _build_dto(**overrides) -> RegistrarRecuentoDTO:
     """Defaults = acta real 1010200001001 del Excel del docente.
 
     Sumas: 140+39+124+345 = 648 votos por partidos.
     Verificación Error1: 877 = 788 + 89 ✓
     Verificación Error2: 648 + 76 + 64 = 788 = anfora ✓
     """
-    defaults: dict[str, int | str] = {
-        "codigo_acta": "1010200001001",
-        "codigo_mesa": 35000,
+    defaults = {
+        "codigo_acta": 1010200001001,
+        "codigo_mesa": 1010200001001,
         "votos_p1": 140,
         "votos_p2": 39,
         "votos_p3": 124,
@@ -44,13 +44,9 @@ def _build_dto(**overrides: int | str) -> RegistrarRecuentoDTO:
         "habilitados": 877,
         "anfora": 788,
         "no_usadas": 89,
-        "apertura_hora": 8,
-        "apertura_minutos": 1,
-        "cierre_hora": 16,
-        "cierre_minutos": 4,
     }
     defaults.update(overrides)
-    return RegistrarRecuentoDTO(**defaults)  # type: ignore[arg-type]
+    return RegistrarRecuentoDTO(**defaults)
 
 
 def _build_use_case() -> tuple[
@@ -75,8 +71,8 @@ class TestRegistrarRecuentoUseCase:
 
         acta = await use_case.execute(dto)
 
-        assert acta.codigo_acta == "1010200001001"
-        assert await acta_repo.exists(dto.id_acta)
+        assert acta.codigo_acta == 1010200001001
+        assert await acta_repo.exists_by_codigo(dto.codigo_acta)
         assert await inc_repo.count() == 0
 
     async def test_error4_acta_ya_procesada(self) -> None:
@@ -99,7 +95,7 @@ class TestRegistrarRecuentoUseCase:
         with pytest.raises(ErroresDeValidacionException):
             await use_case.execute(dto)
 
-        assert not await acta_repo.exists(dto.id_acta)
+        assert not await acta_repo.exists_by_codigo(dto.codigo_acta)
         assert await inc_repo.count() == 1
         assert await inc_repo.count(tipo="ERROR1") == 1
 
@@ -107,7 +103,7 @@ class TestRegistrarRecuentoUseCase:
         use_case, _, inc_repo, _ = _build_use_case()
 
         # 2 actas con SOLO Error1 (no_usadas=88 rompe únicamente la ecuación de Error1)
-        for codigo in ["1010200001001", "1010200001002"]:
+        for codigo in [1010200001001, 1010200001002]:
             dto = _build_dto(codigo_acta=codigo, no_usadas=88)
             with pytest.raises(ErroresDeValidacionException):
                 await use_case.execute(dto)
@@ -127,7 +123,7 @@ class TestRegistrarRecuentoUseCase:
         assert "1010200001001" in str(exc.value)
         assert "no se encuentra en la BDD TREP/OFICIAL" in str(exc.value)
         # No se persiste el acta (mesa no existe → FK violation evitada)
-        assert not await acta_repo.exists(dto.id_acta)
+        assert not await acta_repo.exists_by_codigo(dto.codigo_acta)
         # Sí se persiste el log de inconsistencia con tipo ERROR3
         assert await inc_repo.count() == 1
         assert await inc_repo.count(tipo="ERROR3") == 1

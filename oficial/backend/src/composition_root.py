@@ -23,6 +23,9 @@ from recuento_oficial.application.use_cases.consultar_resultados_por_departament
 from recuento_oficial.application.use_cases.consultar_resultados_por_municipio_use_case import (
     ConsultarResultadosPorMunicipioUseCase,
 )
+from recuento_oficial.application.use_cases.consultar_resultados_por_provincia_use_case import (
+    ConsultarResultadosPorProvinciaUseCase,
+)
 from recuento_oficial.application.use_cases.consultar_resultados_use_case import (
     ConsultarResultadosUseCase,
 )
@@ -33,26 +36,41 @@ from recuento_oficial.application.use_cases.listar_actas_use_case import (
 from recuento_oficial.application.use_cases.listar_candidatos_use_case import (
     ListarCandidatosUseCase,
 )
+from recuento_oficial.application.use_cases.consultar_observaciones_formales_use_case import (
+    ConsultarObservacionesFormalesUseCase,
+)
 from recuento_oficial.application.use_cases.listar_inconsistencias_use_case import (
     ListarInconsistenciasUseCase,
 )
 from recuento_oficial.application.use_cases.registrar_recuento_use_case import (
     RegistrarRecuentoUseCase,
 )
+from recuento_oficial.application.use_cases.reset_actas_use_case import (
+    ResetActasUseCase,
+)
 from recuento_oficial.domain.repositories.acta_oficial_repository import (
     ActaOficialRepository,
+)
+from recuento_oficial.domain.repositories.actas_descartadas_repository import (
+    ActasDescartadasRepository,
 )
 from recuento_oficial.domain.repositories.inconsistencia_repository import (
     InconsistenciaRepository,
 )
 from recuento_oficial.domain.repositories.mesa_repository import MesaRepository
 from recuento_oficial.domain.repositories.partido_repository import PartidoRepository
+from recuento_oficial.domain.repositories.provincia_repository import (
+    ProvinciaRepository,
+)
 from recuento_oficial.domain.repositories.replicacion_repository import (
     ReplicacionRepository,
 )
 from recuento_oficial.domain.services.validador_acta import ValidadorActa
 from recuento_oficial.infrastructure.persistence.repositories.sqla_acta_oficial_repository import (
     SqlaActaOficialRepository,
+)
+from recuento_oficial.infrastructure.persistence.repositories.sqla_actas_descartadas_repository import (
+    SqlaActasDescartadasRepository,
 )
 from recuento_oficial.infrastructure.persistence.repositories.sqla_inconsistencia_repository import (
     SqlaInconsistenciaRepository,
@@ -62,6 +80,9 @@ from recuento_oficial.infrastructure.persistence.repositories.sqla_mesa_reposito
 )
 from recuento_oficial.infrastructure.persistence.repositories.sqla_partido_repository import (
     SqlaPartidoRepository,
+)
+from recuento_oficial.infrastructure.persistence.repositories.sqla_provincia_repository import (
+    SqlaProvinciaRepository,
 )
 from recuento_oficial.infrastructure.persistence.repositories.sqla_replicacion_repository import (
     SqlaReplicacionRepository,
@@ -93,6 +114,14 @@ def get_mesa_repo(session: SessionDep) -> MesaRepository:
     return SqlaMesaRepository(session)
 
 
+def get_provincia_repo(session: SessionDep) -> ProvinciaRepository:
+    return SqlaProvinciaRepository(session)
+
+
+def get_descartadas_repo(session: SessionDep) -> ActasDescartadasRepository:
+    return SqlaActasDescartadasRepository(session)
+
+
 ActaRepoDep = Annotated[ActaOficialRepository, Depends(get_acta_repo)]
 PartidoRepoDep = Annotated[PartidoRepository, Depends(get_partido_repo)]
 InconsistenciaRepoDep = Annotated[
@@ -100,6 +129,10 @@ InconsistenciaRepoDep = Annotated[
 ]
 ReplicacionRepoDep = Annotated[ReplicacionRepository, Depends(get_replicacion_repo)]
 MesaRepoDep = Annotated[MesaRepository, Depends(get_mesa_repo)]
+ProvinciaRepoDep = Annotated[ProvinciaRepository, Depends(get_provincia_repo)]
+DescartadasRepoDep = Annotated[
+    ActasDescartadasRepository, Depends(get_descartadas_repo)
+]
 
 
 # ─── Use case providers ───────────────────────────────────────────────────
@@ -129,6 +162,12 @@ def get_consultar_resultados_por_municipio_use_case(
     return ConsultarResultadosPorMunicipioUseCase(acta_repo, partido_repo)
 
 
+def get_consultar_resultados_por_provincia_use_case(
+    acta_repo: ActaRepoDep, partido_repo: PartidoRepoDep
+) -> ConsultarResultadosPorProvinciaUseCase:
+    return ConsultarResultadosPorProvinciaUseCase(acta_repo, partido_repo)
+
+
 def get_consultar_avance_use_case(acta_repo: ActaRepoDep) -> ConsultarAvanceUseCase:
     return ConsultarAvanceUseCase(acta_repo)
 
@@ -145,6 +184,20 @@ def get_listar_inconsistencias_use_case(
     inc_repo: InconsistenciaRepoDep,
 ) -> ListarInconsistenciasUseCase:
     return ListarInconsistenciasUseCase(inc_repo)
+
+
+def get_consultar_observaciones_formales_use_case(
+    acta_repo: ActaRepoDep,
+) -> ConsultarObservacionesFormalesUseCase:
+    return ConsultarObservacionesFormalesUseCase(acta_repo)
+
+
+def get_reset_actas_use_case(
+    acta_repo: ActaRepoDep,
+    inc_repo: InconsistenciaRepoDep,
+    descartadas_repo: DescartadasRepoDep,
+) -> ResetActasUseCase:
+    return ResetActasUseCase(acta_repo, inc_repo, descartadas_repo)
 
 
 def get_listar_candidatos_use_case(
@@ -173,6 +226,10 @@ ConsultarResultadosPorMunicipioUseCaseDep = Annotated[
     ConsultarResultadosPorMunicipioUseCase,
     Depends(get_consultar_resultados_por_municipio_use_case),
 ]
+ConsultarResultadosPorProvinciaUseCaseDep = Annotated[
+    ConsultarResultadosPorProvinciaUseCase,
+    Depends(get_consultar_resultados_por_provincia_use_case),
+]
 ConsultarAvanceUseCaseDep = Annotated[
     ConsultarAvanceUseCase, Depends(get_consultar_avance_use_case)
 ]
@@ -182,6 +239,13 @@ ConsultarActaUseCaseDep = Annotated[
 ]
 ListarInconsistenciasUseCaseDep = Annotated[
     ListarInconsistenciasUseCase, Depends(get_listar_inconsistencias_use_case)
+]
+ConsultarObservacionesFormalesUseCaseDep = Annotated[
+    ConsultarObservacionesFormalesUseCase,
+    Depends(get_consultar_observaciones_formales_use_case),
+]
+ResetActasUseCaseDep = Annotated[
+    ResetActasUseCase, Depends(get_reset_actas_use_case)
 ]
 ListarCandidatosUseCaseDep = Annotated[
     ListarCandidatosUseCase, Depends(get_listar_candidatos_use_case)

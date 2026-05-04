@@ -22,3 +22,21 @@ class ListaInconsistenciasResponse(BaseModel):
     limit: int
     items: list[InconsistenciaResponse]
     tipo_mas_comun: str | None
+
+
+# ─── /inconsistencias/observaciones-formales ───────────────────────────
+
+
+class ConteoObservacionFormalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tipo: str
+    cantidad: int
+    descripcion_humana: str
+
+
+class ObservacionesFormalesResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int
+    conteos_por_tipo: list[ConteoObservacionFormalResponse]

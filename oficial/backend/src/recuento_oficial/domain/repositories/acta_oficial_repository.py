@@ -9,15 +9,12 @@ from typing import Protocol
 
 from recuento_oficial.domain.entities.acta_oficial import ActaOficial
 from recuento_oficial.domain.entities.departamento import Departamento
+from recuento_oficial.domain.entities.provincia import Provincia
 
 
 @dataclass
 class ResultadoDepto:
-    """Agregado por departamento devuelto por el repository.
-
-    Es el "raw" de la query: el use case lo compone con datos de partidos
-    para producir el DTO de respuesta del endpoint.
-    """
+    """Agregado por departamento devuelto por el repository."""
 
     id_departamento: int
     nombre_departamento: str
@@ -30,11 +27,28 @@ class ResultadoDepto:
 
 
 @dataclass
+class ResultadoProvincia:
+    """Agregado por provincia dentro de un departamento.
+
+    Se calcula con JOIN provincia → municipio → recinto → mesa → acta.
+    """
+
+    codigo_provincia: str
+    nombre_provincia: str
+    total_mesas_provincia: int
+    actas_validadas_provincia: int
+    votos_p1: int
+    votos_p2: int
+    votos_p3: int
+    votos_p4: int
+
+
+@dataclass
 class ResultadoMunicipio:
     """Agregado por municipio devuelto por el repository.
 
-    Mismo patrón que ResultadoDepto pero filtrando por
-    municipio.codigo_departamento.
+    En schema v2 el JOIN ahora pasa por la provincia:
+    departamento → provincia → municipio → recinto → mesa → acta.
     """
 
     codigo_municipio: str
@@ -50,17 +64,18 @@ class ResultadoMunicipio:
 class ActaOficialRepository(Protocol):
     """Contrato de persistencia para `ActaOficial`.
 
-    Implementación concreta vive en infrastructure/persistence/repositories.
-    Implementación fake para tests vive en tests/unit/fakes.
+    Schema v2: id_acta es BIGSERIAL autogenerado por la BD; las queries
+    de lectura siguen aceptando id_acta:int como parámetro pero las
+    inserciones lo dejan en None y la BD lo asigna.
     """
 
     async def save(self, acta: ActaOficial) -> None: ...
 
-    async def get_by_id(self, id_acta: str) -> ActaOficial | None: ...
+    async def get_by_id(self, id_acta: int) -> ActaOficial | None: ...
 
-    async def get_by_codigo(self, codigo_acta: str) -> ActaOficial | None: ...
+    async def get_by_codigo(self, codigo_acta: int) -> ActaOficial | None: ...
 
-    async def exists(self, id_acta: str) -> bool: ...
+    async def exists_by_codigo(self, codigo_acta: int) -> bool: ...
 
     async def list(
         self,
@@ -82,6 +97,10 @@ class ActaOficialRepository(Protocol):
         self,
     ) -> list[ResultadoDepto]: ...
 
+    async def aggregate_resultados_por_provincia(
+        self, codigo_departamento: int
+    ) -> list[ResultadoProvincia]: ...
+
     async def aggregate_resultados_por_municipio(
         self, codigo_departamento: int
     ) -> list[ResultadoMunicipio]: ...
@@ -90,8 +109,18 @@ class ActaOficialRepository(Protocol):
         self, codigo: int
     ) -> Departamento | None: ...
 
+    async def provincia_por_codigo(
+        self, codigo: str
+    ) -> Provincia | None: ...
+
     async def total_blancos(self) -> int: ...
 
     async def total_nulos(self) -> int: ...
 
     async def count_actas_validadas(self) -> int: ...
+
+    async def contar_por_tipo_observacion_formal(self) -> dict[str, int]: ...
+
+    async def count_all(self) -> int: ...
+
+    async def truncate_all(self) -> None: ...

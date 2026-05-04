@@ -20,11 +20,10 @@ from recuento_oficial.domain.exceptions import ErroresDeValidacionException
 from recuento_oficial.domain.services.validador_acta import ValidadorActa
 
 
-def _build_acta(**overrides: int) -> ActaOficial:
-    defaults: dict[str, int | str | datetime] = {
-        "id_acta": "sha256:test",
-        "codigo_acta": "1010200001001",
-        "codigo_mesa": 35000,
+def _build_acta(**overrides) -> ActaOficial:
+    defaults = {
+        "codigo_acta": 1010200001001,
+        "codigo_mesa": 1010200001001,
         "votos_p1": 140,
         "votos_p2": 39,
         "votos_p3": 124,
@@ -34,14 +33,10 @@ def _build_acta(**overrides: int) -> ActaOficial:
         "habilitados": 877,
         "anfora": 788,
         "no_usadas": 89,
-        "apertura_hora": 8,
-        "apertura_minutos": 1,
-        "cierre_hora": 16,
-        "cierre_minutos": 4,
-        "fecha_creacion": datetime(2026, 5, 3, tzinfo=timezone.utc),
+        "fecha_procesado": datetime(2026, 5, 3, tzinfo=timezone.utc),
     }
     defaults.update(overrides)
-    return ActaOficial(**defaults)  # type: ignore[arg-type]
+    return ActaOficial(**defaults)
 
 
 class TestValidadorActa:

@@ -22,7 +22,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCHEMA_SQL = (ROOT / "sql" / "01-schema.sql").read_text(encoding="utf-8")
+# Schema v2 es la fuente de verdad desde rama Alex_2.0.
+SCHEMA_SQL = (ROOT / "sql" / "01-schema-v2.sql").read_text(encoding="utf-8")
 
 ORM_FILES = list((ROOT / "backend" / "src" / "recuento_oficial" /
                   "infrastructure" / "persistence" / "models").glob("*_orm.py"))
@@ -59,7 +60,7 @@ for table, cols in sorted(table_columns.items()):
     # Verificar cada columna
     # Buscamos el bloque CREATE TABLE específico
     create_match = re.search(
-        rf"CREATE TABLE IF NOT EXISTS oficial\.{table}\s*\((?P<body>.*?)\);",
+        rf"CREATE TABLE (?:IF NOT EXISTS )?oficial\.{table}\s*\((?P<body>.*?)\);",
         SCHEMA_SQL,
         re.DOTALL,
     )

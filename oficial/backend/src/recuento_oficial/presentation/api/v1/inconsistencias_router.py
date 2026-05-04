@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Query
 
-from composition_root import ListarInconsistenciasUseCaseDep
+from composition_root import (
+    ConsultarObservacionesFormalesUseCaseDep,
+    ListarInconsistenciasUseCaseDep,
+)
 from recuento_oficial.presentation.schemas.inconsistencias_schemas import (
     InconsistenciaResponse,
     ListaInconsistenciasResponse,
+    ObservacionesFormalesResponse,
 )
 
 router = APIRouter(prefix="/api/v1/oficial", tags=["oficial-inconsistencias"])
@@ -27,3 +31,14 @@ async def list_inconsistencias(
         items=[InconsistenciaResponse.model_validate(i) for i in resultado.items],
         tipo_mas_comun=resultado.tipo_mas_comun,
     )
+
+
+@router.get(
+    "/inconsistencias/observaciones-formales",
+    response_model=ObservacionesFormalesResponse,
+)
+async def get_observaciones_formales(
+    use_case: ConsultarObservacionesFormalesUseCaseDep,
+) -> ObservacionesFormalesResponse:
+    resultado = await use_case.execute()
+    return ObservacionesFormalesResponse.model_validate(resultado)

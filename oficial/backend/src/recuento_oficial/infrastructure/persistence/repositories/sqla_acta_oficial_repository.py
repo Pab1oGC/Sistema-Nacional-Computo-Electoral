@@ -3,14 +3,16 @@
 # patrón que en el Protocol del repository y en el fake.
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recuento_oficial.domain.entities.acta_oficial import ActaOficial
 from recuento_oficial.domain.entities.departamento import Departamento
+from recuento_oficial.domain.entities.provincia import Provincia
 from recuento_oficial.domain.repositories.acta_oficial_repository import (
     ResultadoDepto,
     ResultadoMunicipio,
+    ResultadoProvincia,
 )
 from recuento_oficial.infrastructure.persistence.mappers.acta_oficial_mapper import (
     entity_to_orm,
@@ -26,6 +28,9 @@ from recuento_oficial.infrastructure.persistence.models.mesa_orm import MesaORM
 from recuento_oficial.infrastructure.persistence.models.municipio_orm import (
     MunicipioORM,
 )
+from recuento_oficial.infrastructure.persistence.models.provincia_orm import (
+    ProvinciaORM,
+)
 from recuento_oficial.infrastructure.persistence.models.recinto_orm import RecintoORM
 
 
@@ -34,22 +39,27 @@ class SqlaActaOficialRepository:
         self._session = session
 
     async def save(self, acta: ActaOficial) -> None:
-        self._session.add(entity_to_orm(acta))
+        orm = entity_to_orm(acta)
+        self._session.add(orm)
         await self._session.flush()
+        # Tras el flush, BIGSERIAL ya asignó id_acta y server_default fijó
+        # fecha_procesado. Reflejamos al entity para que el caller lo vea.
+        acta.id_acta = orm.id_acta
+        acta.fecha_procesado = orm.fecha_procesado
 
-    async def get_by_id(self, id_acta: str) -> ActaOficial | None:
+    async def get_by_id(self, id_acta: int) -> ActaOficial | None:
         stmt = select(ActaOficialORM).where(ActaOficialORM.id_acta == id_acta)
         orm = (await self._session.execute(stmt)).scalar_one_or_none()
         return orm_to_entity(orm) if orm else None
 
-    async def get_by_codigo(self, codigo_acta: str) -> ActaOficial | None:
+    async def get_by_codigo(self, codigo_acta: int) -> ActaOficial | None:
         stmt = select(ActaOficialORM).where(ActaOficialORM.codigo_acta == codigo_acta)
         orm = (await self._session.execute(stmt)).scalar_one_or_none()
         return orm_to_entity(orm) if orm else None
 
-    async def exists(self, id_acta: str) -> bool:
+    async def exists_by_codigo(self, codigo_acta: int) -> bool:
         stmt = select(1).select_from(ActaOficialORM).where(
-            ActaOficialORM.id_acta == id_acta
+            ActaOficialORM.codigo_acta == codigo_acta
         )
         return (await self._session.execute(stmt)).scalar() is not None
 
@@ -61,7 +71,7 @@ class SqlaActaOficialRepository:
         limit: int = 20,
     ) -> list[ActaOficial]:
         stmt = self._build_filtered_query(codigo_mesa, territorial)
-        stmt = stmt.order_by(ActaOficialORM.fecha_creacion.desc())
+        stmt = stmt.order_by(ActaOficialORM.fecha_procesado.desc())
         stmt = stmt.offset((page - 1) * limit).limit(limit)
         rows = (await self._session.execute(stmt)).scalars().all()
         return [orm_to_entity(o) for o in rows]
@@ -103,9 +113,9 @@ class SqlaActaOficialRepository:
     ) -> list[ResultadoDepto]:
         """Agrega votos y conteos por departamento.
 
-        Recorre la cadena depto → municipio → recinto → mesa, y hace LEFT
-        JOIN con acta_oficial para que los departamentos sin actas igual
-        aparezcan con conteos en cero.
+        Schema v2: cadena depto → provincia → municipio → recinto → mesa,
+        con LEFT JOIN a acta_oficial para que deptos sin actas aparezcan
+        con conteos en cero.
         """
         stmt = (
             select(
@@ -120,8 +130,12 @@ class SqlaActaOficialRepository:
             )
             .select_from(DepartamentoORM)
             .join(
+                ProvinciaORM,
+                ProvinciaORM.codigo_departamento == DepartamentoORM.codigo,
+            )
+            .join(
                 MunicipioORM,
-                MunicipioORM.codigo_departamento == DepartamentoORM.codigo,
+                MunicipioORM.codigo_provincia == ProvinciaORM.codigo,
             )
             .join(
                 RecintoORM, RecintoORM.codigo_municipio == MunicipioORM.codigo
@@ -149,14 +163,65 @@ class SqlaActaOficialRepository:
             for row in result
         ]
 
+    async def aggregate_resultados_por_provincia(
+        self, codigo_departamento: int
+    ) -> list[ResultadoProvincia]:
+        """Agrega votos y conteos por provincia dentro de un departamento.
+
+        JOIN profundo: provincia → municipio → recinto → mesa, con LEFT JOIN
+        a acta_oficial. Provincias sin actas igual aparecen con cero.
+        """
+        stmt = (
+            select(
+                ProvinciaORM.codigo.label("codigo_provincia"),
+                ProvinciaORM.nombre.label("nombre_provincia"),
+                func.count(MesaORM.codigo_mesa.distinct()).label("total_mesas"),
+                func.count(ActaOficialORM.id_acta.distinct()).label("actas_validadas"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p1), 0).label("votos_p1"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p2), 0).label("votos_p2"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p3), 0).label("votos_p3"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p4), 0).label("votos_p4"),
+            )
+            .select_from(ProvinciaORM)
+            .join(
+                MunicipioORM,
+                MunicipioORM.codigo_provincia == ProvinciaORM.codigo,
+            )
+            .join(
+                RecintoORM, RecintoORM.codigo_municipio == MunicipioORM.codigo
+            )
+            .join(MesaORM, MesaORM.codigo_recinto == RecintoORM.codigo_recinto)
+            .outerjoin(
+                ActaOficialORM,
+                ActaOficialORM.codigo_mesa == MesaORM.codigo_mesa,
+            )
+            .where(ProvinciaORM.codigo_departamento == codigo_departamento)
+            .group_by(ProvinciaORM.codigo, ProvinciaORM.nombre)
+            .order_by(ProvinciaORM.nombre)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            ResultadoProvincia(
+                codigo_provincia=str(row.codigo_provincia),
+                nombre_provincia=str(row.nombre_provincia),
+                total_mesas_provincia=int(row.total_mesas),
+                actas_validadas_provincia=int(row.actas_validadas),
+                votos_p1=int(row.votos_p1),
+                votos_p2=int(row.votos_p2),
+                votos_p3=int(row.votos_p3),
+                votos_p4=int(row.votos_p4),
+            )
+            for row in result
+        ]
+
     async def aggregate_resultados_por_municipio(
         self, codigo_departamento: int
     ) -> list[ResultadoMunicipio]:
         """Agrega votos y conteos por municipio dentro de un departamento.
 
-        INNER JOIN con departamento (vía municipio.codigo_departamento) y
-        LEFT JOIN con acta_oficial para que municipios sin actas igual
-        aparezcan con conteos en cero.
+        Schema v2: el filtro por departamento ahora pasa por la provincia.
+        Cadena: provincia (filtrada por depto) → municipio → recinto → mesa,
+        con LEFT JOIN a acta_oficial.
         """
         stmt = (
             select(
@@ -171,6 +236,10 @@ class SqlaActaOficialRepository:
             )
             .select_from(MunicipioORM)
             .join(
+                ProvinciaORM,
+                ProvinciaORM.codigo == MunicipioORM.codigo_provincia,
+            )
+            .join(
                 RecintoORM, RecintoORM.codigo_municipio == MunicipioORM.codigo
             )
             .join(MesaORM, MesaORM.codigo_recinto == RecintoORM.codigo_recinto)
@@ -178,7 +247,7 @@ class SqlaActaOficialRepository:
                 ActaOficialORM,
                 ActaOficialORM.codigo_mesa == MesaORM.codigo_mesa,
             )
-            .where(MunicipioORM.codigo_departamento == codigo_departamento)
+            .where(ProvinciaORM.codigo_departamento == codigo_departamento)
             .group_by(MunicipioORM.codigo, MunicipioORM.nombre)
             .order_by(MunicipioORM.nombre)
         )
@@ -206,6 +275,19 @@ class SqlaActaOficialRepository:
             return None
         return Departamento(codigo=orm.codigo, nombre=orm.nombre)
 
+    async def provincia_por_codigo(
+        self, codigo: str
+    ) -> Provincia | None:
+        stmt = select(ProvinciaORM).where(ProvinciaORM.codigo == codigo)
+        orm = (await self._session.execute(stmt)).scalar_one_or_none()
+        if orm is None:
+            return None
+        return Provincia(
+            codigo=orm.codigo,
+            nombre=orm.nombre,
+            codigo_departamento=orm.codigo_departamento,
+        )
+
     async def total_blancos(self) -> int:
         stmt = select(func.coalesce(func.sum(ActaOficialORM.blancos), 0))
         return int((await self._session.execute(stmt)).scalar() or 0)
@@ -217,3 +299,48 @@ class SqlaActaOficialRepository:
     async def count_actas_validadas(self) -> int:
         stmt = select(func.count()).select_from(ActaOficialORM)
         return int((await self._session.execute(stmt)).scalar() or 0)
+
+    async def contar_por_tipo_observacion_formal(self) -> dict[str, int]:
+        """Devuelve {tipo_enum: cantidad} con los 9 valores del enum.
+
+        Los tipos sin observaciones aparecen con cantidad=0. Garantiza
+        que el dashboard recibe siempre las 9 categorías para mostrar
+        consistentemente.
+        """
+        stmt = (
+            select(
+                ActaOficialORM.tipo_observacion_formal,
+                func.count().label("n"),
+            )
+            .where(ActaOficialORM.tipo_observacion_formal.is_not(None))
+            .group_by(ActaOficialORM.tipo_observacion_formal)
+        )
+        result = await self._session.execute(stmt)
+        # Inicializamos las 9 categorías en 0 y rellenamos las que
+        # tienen actas. Importamos el catálogo desde el ORM para mantener
+        # una sola fuente de verdad.
+        from recuento_oficial.infrastructure.persistence.models.acta_oficial_orm import (
+            TIPO_OBSERVACION_FORMAL_VALUES,
+        )
+
+        conteos: dict[str, int] = {t: 0 for t in TIPO_OBSERVACION_FORMAL_VALUES}
+        for row in result:
+            tipo = row[0]
+            cantidad = int(row[1])
+            if tipo is not None:
+                conteos[str(tipo)] = cantidad
+        return conteos
+
+    async def count_all(self) -> int:
+        return await self.count_actas_validadas()
+
+    async def truncate_all(self) -> None:
+        # RESTART IDENTITY resetea el BIGSERIAL id_acta a 1.
+        # Commit explícito porque el endpoint admin no debe depender del
+        # rollback automático que get_session() haría si algo más fallara
+        # después en la request (acá no falla nada, pero por consistencia
+        # con el patrón de inconsistencias.commit_pendiente).
+        await self._session.execute(
+            text("TRUNCATE TABLE oficial.acta_oficial RESTART IDENTITY")
+        )
+        await self._session.commit()

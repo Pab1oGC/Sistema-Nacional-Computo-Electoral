@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
@@ -5,13 +7,10 @@ from dataclasses import dataclass
 class Municipio:
     """Municipio boliviano.
 
-    Nota sobre el bug del Excel del docente: la hoja DistribucionTerritorial
-    tiene las columnas "Municipio" y "Provincia" invertidas. En esta entity
-    los campos están con su semántica correcta. Ver `oficial/CLAUDE.md` sec 8
-    y `sql/04-carga-datos.sql` para la inversión en la carga.
+    Schema v2: el FK ahora es a provincia (no a departamento). Para llegar
+    al departamento se hace JOIN provincia → municipio.
     """
 
     codigo: str
     nombre: str
-    provincia: str
-    codigo_departamento: int
+    codigo_provincia: str
