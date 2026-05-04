@@ -1,0 +1,113 @@
+codigo,nombre,codigo_departamento
+101,Oropeza,1
+102,Azurduy,1
+103,Zudáñez,1
+104,Tomina,1
+105,Hernando Siles,1
+106,Yamparáez,1
+107,Nor Cinti,1
+108,Belisario Boeto,1
+109,Sud Cinti,1
+110,Luis Calvo,1
+201,Murillo,2
+202,Omasuyos,2
+203,Pacajes,2
+204,Camacho,2
+205,Muñecas,2
+206,Larecaja,2
+207,Franz Tamayo,2
+208,Ingavi,2
+209,Loayza,2
+210,Inquisivi,2
+211,Sud Yungas,2
+212,Los Andes,2
+213,Aroma,2
+214,Nor Yungas,2
+215,Iturralde,2
+216,Bautista Saavedra,2
+217,Manco Kapac,2
+218,Gualberto Villarroel,2
+219,General José Manuel Pando,2
+220,Caranavi,2
+301,Cercado,3
+302,Campero,3
+303,Ayopaya,3
+304,Esteban Arze,3
+305,Arani,3
+306,Arque,3
+307,Capinota,3
+308,Germán Jordán,3
+309,Quillacollo,3
+310,Chapare,3
+311,Tapacarí,3
+312,Carrasco,3
+313,Mizque,3
+314,Punata,3
+315,Bolívar,3
+316,Tiraque,3
+401,Cercado,4
+402,Abaroa,4
+403,Carangas,4
+404,Sajama,4
+405,Litoral,4
+406,Poopó,4
+407,Dalence,4
+408,Ladislao Cabrera,4
+409,Sabaya,4
+410,Saucarí,4
+411,Tomás Barrón,4
+412,Sud Carangas,4
+413,San Pedro de Totora,4
+414,Sebastián Pagador,4
+415,Mejillones,4
+416,Nor Carangas,4
+501,Tomás Frías,5
+502,Rafael Bustillo,5
+503,Cornelio Saavedra,5
+504,Chayanta,5
+505,Charcas,5
+506,Nor Chichas,5
+507,Alonso de Ibáñez,5
+508,Sud Chichas,5
+509,Nor Lípez,5
+510,Sud Lípez,5
+511,Linares,5
+512,Quijarro,5
+513,General Bilbao,5
+514,Daniel Campos,5
+515,Modesto Omiste,5
+516,Enrique Baldivieso,5
+601,Cercado,6
+602,Arce,6
+603,Gran Chaco,6
+604,José María Avilés,6
+605,Méndez,6
+606,O'Connor,6
+701,Andrés Ibáñez,7
+702,Warnes,7
+703,Velasco,7
+704,Ichilo,7
+705,Chiquitos,7
+706,Sara,7
+707,Cordillera,7
+708,Vallegrande,7
+709,Florida,7
+710,Obispo Santistevan,7
+711,Ñuflo de Chaves,7
+712,Ángel Sandóval,7
+713,Caballero,7
+714,Germán Busch,7
+715,Guarayos,7
+801,Cercado,8
+802,Vaca Díez,8
+803,General José Ballivián,8
+804,Yacuma,8
+805,Moxos,8
+806,Marbán,8
+807,Mamoré,8
+808,Iténez,8
+901,Nicolás Suárez,9
+902,Manuripi,9
+903,Madre de Dios,9
+904,Abuná,9
+905,General Federico Román,9

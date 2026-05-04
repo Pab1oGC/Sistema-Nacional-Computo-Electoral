@@ -1,0 +1,341 @@
+codigo,nombre,codigo_provincia
+10101,Sucre,101
+10102,Yotala,101
+10103,Poroma,101
+10201,Azurduy,102
+10202,Tarvita,102
+10301,Villa Zudáñez,103
+10302,Presto,103
+10303,Villa Mojocoya,103
+10304,Icla,103
+10401,Padilla,104
+10402,Tomina,104
+10403,Sopachuy,104
+10404,Villa Alcalá,104
+10405,El Villar,104
+10501,Monteagudo,105
+10502,Huacareta,105
+10601,Tarabuco,106
+10602,Yamparáez,106
+10701,Camargo,107
+10702,San Lucas,107
+10703,Incahuasi,107
+10704,Villa Charcas,107
+10801,Villa Serrano,108
+10901,Villa Abecia,109
+10902,Culpina,109
+10903,Las Carreras,109
+11001,Villa Vaca Guzmán (Muyupampa),110
+11002,Huacaya,110
+11003,Macharetí,110
+20101,La Paz,201
+20102,Palca,201
+20103,Mecapaca,201
+20104,Achocalla,201
+20105,El Alto,201
+20201,Achacachi,202
+20202,Ancoraimes,202
+20203,Chua Cocani,202
+20204,Huarina,202
+20205,Santiago de Huata,202
+20206,Huatajata,202
+20301,Coro Coro,203
+20302,Caquiaviri,203
+20303,Calacoto,203
+20304,Comanche,203
+20305,Charaña,203
+20306,Waldo Ballivián,203
+20307,Nazacara de Pacajes,203
+20308,Callapa,203
+20401,Puerto Acosta,204
+20402,Mocomoco,204
+20403,Puerto Carabuco,204
+20404,Humanata,204
+20405,Escoma,204
+20501,Chuma,205
+20502,Ayata,205
+20503,Aucapata,205
+20601,Sorata,206
+20602,Guanay,206
+20603,Tacacoma,206
+20604,Quiabaya,206
+20605,Combaya,206
+20606,Tipuani,206
+20607,Mapiri,206
+20608,Teoponte,206
+20701,Apolo,207
+20702,Pelechuco,207
+20801,Viacha,208
+20802,Guaqui,208
+20803,Tiahuanaco,208
+20804,Desaguadero,208
+20805,San Andrés de Machaca,208
+20806,Jesús de Machaca,208
+20807,Taraco,208
+20901,Luribay,209
+20902,Sapahaqui,209
+20903,Yaco,209
+20904,Malla,209
+20905,Cairoma,209
+21001,Inquisivi,210
+21002,Quime,210
+21003,Cajuata,210
+21004,Colquiri,210
+21005,Ichoca,210
+21006,Licoma Pampa,210
+21101,Chulumani,211
+21102,Irupana,211
+21103,Yanacachi,211
+21104,Palos Blancos,211
+21105,La Asunta,211
+21201,Pucarani,212
+21202,Laja,212
+21203,Batallas,212
+21204,Puerto Pérez,212
+21301,Sica Sica,213
+21302,Umala,213
+21303,Ayo Ayo,213
+21304,Calamarca,213
+21305,Patacamaya,213
+21306,Colquencha,213
+21307,Collana,213
+21401,Coroico,214
+21402,Coripata,214
+21501,Ixiamas,215
+21502,San Buenaventura,215
+21601,Charazani,216
+21602,Curva,216
+21701,Copacabana,217
+21702,San Pedro de Tiquina,217
+21703,Tito Yupanqui,217
+21801,San Pedro de Curahuara,218
+21802,Papel Pampa,218
+21803,Chacarilla,218
+21901,Santiago de Machaca,219
+21902,Catacora,219
+22001,Caranavi,220
+22002,Alto Beni,220
+30101,Cochabamba,301
+30201,Aiquile,302
+30202,Pasorapa,302
+30203,Omereque,302
+30301,Independencia,303
+30302,Morochata,303
+30303,Cocapata,303
+30401,Tarata,304
+30402,Anzaldo,304
+30403,Arbieto,304
+30404,Sacabamba,304
+30501,Arani,305
+30502,Vacas,305
+30601,Arque,306
+30602,Tacopaya,306
+30701,Capinota,307
+30702,Santiváñez,307
+30703,Sicaya,307
+30801,Cliza,308
+30802,Toco,308
+30803,Tolata,308
+30901,Quillacollo,309
+30902,Sipe Sipe,309
+30903,Tiquipaya,309
+30904,Vinto,309
+30905,Colcapirhua,309
+31001,Sacaba,310
+31002,Colomi,310
+31003,Villa Tunari,310
+31101,Tapacarí,311
+31201,Totora,312
+31202,Pojo,312
+31203,Pocona,312
+31204,Chimoré,312
+31205,Puerto Villarroel,312
+31206,Entre Ríos,312
+31301,Mizque,313
+31302,Vila Vila,313
+31303,Alalay,313
+31401,Punata,314
+31402,Villa Rivero,314
+31403,San Benito,314
+31404,Tacachi,314
+31405,Cuchumuela,314
+31501,Bolívar,315
+31601,Tiraque,316
+31602,Shinahota,316
+40101,Oruro,401
+40102,Caracollo,401
+40103,El Choro,401
+40104,Paria,401
+40201,Challapata,402
+40202,Quillacas,402
+40301,Corque,403
+40302,Choquecota,403
+40401,Curahuara de Carangas,404
+40402,Turco,404
+40501,Huachacalla,405
+40502,Escara,405
+40503,Cruz de Machacamarca,405
+40504,Yunguyo de Litoral,405
+40505,Esmeralda,405
+40601,Poopó,406
+40602,Pazña,406
+40603,Antequera,406
+40701,Huanuni,407
+40702,Machacamarca,407
+40801,Salinas de Garci Mendoza,408
+40802,Pampa Aullagas,408
+40901,Sabaya,409
+40902,Coipasa,409
+40903,Chipaya,409
+41001,Toledo,410
+41101,Eucaliptus,411
+41201,Santiago de Andamarca,412
+41202,Belén de Andamarca,412
+41301,Totora,413
+41401,Santiago de Huari,414
+41501,La Rivera,415
+41502,Todos Santos,415
+41503,Carangas,415
+41601,Huayllamarca,416
+50101,Potosí,501
+50102,Tinguipaya,501
+50103,Yocalla,501
+50104,Urmiri,501
+50201,Uncía,502
+50202,Chayanta,502
+50203,Llallagua,502
+50204,Chuquihuta,502
+50301,Betanzos,503
+50302,Chaquí,503
+50303,Tacobamba,503
+50401,Colquechaca,504
+50402,Ravelo,504
+50403,Pocoata,504
+50404,Ocurí,504
+50405,San Pedro de Macha,504
+50501,San Pedro de Buena Vista,505
+50502,Toro Toro,505
+50601,Cotagaita,506
+50602,Vitichi,506
+50701,Sacaca,507
+50702,Caripuyo,507
+50801,Tupiza,508
+50802,Atocha,508
+50901,Colcha K,509
+50902,San Pedro de Quemes,509
+51001,San Pablo de Lípez,510
+51002,Mojinete,510
+51003,San Antonio de Esmoruco,510
+51101,Puna,511
+51102,Caiza D,511
+51103,Ckochas,511
+51201,Uyuni,512
+51202,Tomave,512
+51203,Porco,512
+51301,Arampampa,513
+51302,Acasio,513
+51401,Llica,514
+51402,Tahua,514
+51501,Villazón,515
+51601,San Agustín,516
+60101,Tarija,601
+60201,Padcaya,602
+60202,Bermejo,602
+60301,Yacuiba,603
+60302,Caraparí,603
+60303,Villa Montes,603
+60401,Uriondo,604
+60402,Yunchará,604
+60501,San Lorenzo,605
+60502,El Puente,605
+60601,Entre Ríos,606
+70101,Santa Cruz de la Sierra,701
+70102,Cotoca,701
+70103,Porongo,701
+70104,La Guardia,701
+70105,El Torno,701
+70201,Warnes,702
+70202,Okinawa Uno,702
+70301,San Ignacio de Velasco,703
+70302,San Miguel de Velasco,703
+70303,San Rafael de Velasco,703
+70401,Buena Vista,704
+70402,San Carlos,704
+70403,Villa Yapacaní,704
+70404,San Juan de Yapacaní,704
+70501,San José de Chiquitos,705
+70502,Pailón,705
+70503,Roboré,705
+70601,Portachuelo,706
+70602,Santa Rosa del Sara,706
+70603,Colpa Bélgica,706
+70701,Lagunillas,707
+70702,Charagua,707
+70703,Cabezas,707
+70704,Cuevo,707
+70705,Gutiérrez (Kereimba Iyambae),707
+70706,Camiri,707
+70707,Boyuibe,707
+70801,Vallegrande,708
+70802,El Trigal,708
+70803,Moro Moro,708
+70804,Postrervalle,708
+70805,Pucará,708
+70901,Samaipata,709
+70902,Pampagrande,709
+70903,Mairana,709
+70904,Quirusillas,709
+71001,Montero,710
+71002,General Saavedra,710
+71003,Mineros,710
+71004,Fernández Alonso,710
+71005,San Pedro,710
+71101,Concepción,711
+71102,San Javier,711
+71103,San Julián,711
+71104,San Ramón,711
+71105,San Antonio de Lomerío,711
+71106,Cuatro Cañadas,711
+71201,San Matías,712
+71301,Comarapa,713
+71302,Saipina,713
+71401,Puerto Suárez,714
+71402,Puerto Quijarro,714
+71403,El Carmen Rivero Tórrez,714
+71501,Ascensión de Guarayos,715
+71502,Urubichá,715
+71503,El Puente,715
+80101,Trinidad,801
+80102,San Javier,801
+80201,Riberalta,802
+80202,Guayaramerín,802
+80301,Reyes,803
+80302,San Borja,803
+80303,Santa Rosa,803
+80304,Rurrenabaque,803
+80401,Santa Ana del Yacuma,804
+80402,Exaltación,804
+80501,San Ignacio de Moxos,805
+80601,Loreto,806
+80602,San Andrés,806
+80701,San Joaquín,807
+80702,San Ramón,807
+80703,Puerto Siles,807
+80801,Magdalena,808
+80802,Baures,808
+80803,Huacaraje,808
+90101,Cobija,901
+90102,Porvenir,901
+90103,Bolpebra,901
+90104,Bella Flor,901
+90201,Puerto Rico,902
+90202,San Pedro,902
+90203,Filadelfia,902
+90301,Puerto Gonzalo Moreno,903
+90302,San Lorenzo,903
+90303,Sena,903
+90401,Santa Rosa del Abuná,904
+90402,Ingavi,904
+90501,Nueva Esperanza,905
+90502,Villa Nueva,905
+90503,Santos Mercado,905
