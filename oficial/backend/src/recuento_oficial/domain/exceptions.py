@@ -39,3 +39,13 @@ class ErroresDeValidacionException(DominioException):
 
 class ReplicaNoDisponibleException(DominioException):
     """La réplica de PostgreSQL no está disponible."""
+
+
+class DepartamentoNoExisteException(DominioException):
+    """El código de departamento solicitado no existe en el catálogo."""
+
+    def __init__(self, codigo: int) -> None:
+        self.codigo = codigo
+        super().__init__(
+            f"El departamento con código {codigo} no existe en el catálogo OEP"
+        )

@@ -192,8 +192,12 @@ services:
       context: ./dashboard-oficial
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Mapeo: 5174 host → 80 container. nginx (stage runtime del
+    # Dockerfile) escucha en :80, no en :5173. El 5173 era de Vite dev
+    # server, no aplica acá: servimos el dist/ built estáticamente con
+    # nginx.
     ports:
-      - "5174:5173"
+      - "5174:80"
     environment:
       VITE_API_URL: http://oficial_api:8000
     networks:

@@ -1,7 +1,17 @@
+# Anotaciones lazy: la clase tiene un método `list` que sombrea el
+# builtin `list[T]` en anotaciones que vengan DESPUÉS del def. Igual
+# patrón que en el Protocol del repository y en el fake.
+from __future__ import annotations
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recuento_oficial.domain.entities.acta_oficial import ActaOficial
+from recuento_oficial.domain.entities.departamento import Departamento
+from recuento_oficial.domain.repositories.acta_oficial_repository import (
+    ResultadoDepto,
+    ResultadoMunicipio,
+)
 from recuento_oficial.infrastructure.persistence.mappers.acta_oficial_mapper import (
     entity_to_orm,
     orm_to_entity,
@@ -9,7 +19,13 @@ from recuento_oficial.infrastructure.persistence.mappers.acta_oficial_mapper imp
 from recuento_oficial.infrastructure.persistence.models.acta_oficial_orm import (
     ActaOficialORM,
 )
+from recuento_oficial.infrastructure.persistence.models.departamento_orm import (
+    DepartamentoORM,
+)
 from recuento_oficial.infrastructure.persistence.models.mesa_orm import MesaORM
+from recuento_oficial.infrastructure.persistence.models.municipio_orm import (
+    MunicipioORM,
+)
 from recuento_oficial.infrastructure.persistence.models.recinto_orm import RecintoORM
 
 
@@ -81,6 +97,114 @@ class SqlaActaOficialRepository:
         )
         row = (await self._session.execute(stmt)).one()
         return {1: int(row[0]), 2: int(row[1]), 3: int(row[2]), 4: int(row[3])}
+
+    async def aggregate_resultados_por_departamento(
+        self,
+    ) -> list[ResultadoDepto]:
+        """Agrega votos y conteos por departamento.
+
+        Recorre la cadena depto → municipio → recinto → mesa, y hace LEFT
+        JOIN con acta_oficial para que los departamentos sin actas igual
+        aparezcan con conteos en cero.
+        """
+        stmt = (
+            select(
+                DepartamentoORM.codigo.label("id_departamento"),
+                DepartamentoORM.nombre.label("nombre_departamento"),
+                func.count(MesaORM.codigo_mesa.distinct()).label("total_mesas"),
+                func.count(ActaOficialORM.id_acta.distinct()).label("actas_validadas"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p1), 0).label("votos_p1"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p2), 0).label("votos_p2"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p3), 0).label("votos_p3"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p4), 0).label("votos_p4"),
+            )
+            .select_from(DepartamentoORM)
+            .join(
+                MunicipioORM,
+                MunicipioORM.codigo_departamento == DepartamentoORM.codigo,
+            )
+            .join(
+                RecintoORM, RecintoORM.codigo_municipio == MunicipioORM.codigo
+            )
+            .join(MesaORM, MesaORM.codigo_recinto == RecintoORM.codigo_recinto)
+            .outerjoin(
+                ActaOficialORM,
+                ActaOficialORM.codigo_mesa == MesaORM.codigo_mesa,
+            )
+            .group_by(DepartamentoORM.codigo, DepartamentoORM.nombre)
+            .order_by(DepartamentoORM.codigo)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            ResultadoDepto(
+                id_departamento=int(row.id_departamento),
+                nombre_departamento=str(row.nombre_departamento),
+                total_mesas_depto=int(row.total_mesas),
+                actas_validadas_depto=int(row.actas_validadas),
+                votos_p1=int(row.votos_p1),
+                votos_p2=int(row.votos_p2),
+                votos_p3=int(row.votos_p3),
+                votos_p4=int(row.votos_p4),
+            )
+            for row in result
+        ]
+
+    async def aggregate_resultados_por_municipio(
+        self, codigo_departamento: int
+    ) -> list[ResultadoMunicipio]:
+        """Agrega votos y conteos por municipio dentro de un departamento.
+
+        INNER JOIN con departamento (vía municipio.codigo_departamento) y
+        LEFT JOIN con acta_oficial para que municipios sin actas igual
+        aparezcan con conteos en cero.
+        """
+        stmt = (
+            select(
+                MunicipioORM.codigo.label("codigo_municipio"),
+                MunicipioORM.nombre.label("nombre_municipio"),
+                func.count(MesaORM.codigo_mesa.distinct()).label("total_mesas"),
+                func.count(ActaOficialORM.id_acta.distinct()).label("actas_validadas"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p1), 0).label("votos_p1"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p2), 0).label("votos_p2"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p3), 0).label("votos_p3"),
+                func.coalesce(func.sum(ActaOficialORM.votos_p4), 0).label("votos_p4"),
+            )
+            .select_from(MunicipioORM)
+            .join(
+                RecintoORM, RecintoORM.codigo_municipio == MunicipioORM.codigo
+            )
+            .join(MesaORM, MesaORM.codigo_recinto == RecintoORM.codigo_recinto)
+            .outerjoin(
+                ActaOficialORM,
+                ActaOficialORM.codigo_mesa == MesaORM.codigo_mesa,
+            )
+            .where(MunicipioORM.codigo_departamento == codigo_departamento)
+            .group_by(MunicipioORM.codigo, MunicipioORM.nombre)
+            .order_by(MunicipioORM.nombre)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            ResultadoMunicipio(
+                codigo_municipio=str(row.codigo_municipio),
+                nombre_municipio=str(row.nombre_municipio),
+                total_mesas_municipio=int(row.total_mesas),
+                actas_validadas_municipio=int(row.actas_validadas),
+                votos_p1=int(row.votos_p1),
+                votos_p2=int(row.votos_p2),
+                votos_p3=int(row.votos_p3),
+                votos_p4=int(row.votos_p4),
+            )
+            for row in result
+        ]
+
+    async def departamento_por_codigo(
+        self, codigo: int
+    ) -> Departamento | None:
+        stmt = select(DepartamentoORM).where(DepartamentoORM.codigo == codigo)
+        orm = (await self._session.execute(stmt)).scalar_one_or_none()
+        if orm is None:
+            return None
+        return Departamento(codigo=orm.codigo, nombre=orm.nombre)
 
     async def total_blancos(self) -> int:
         stmt = select(func.coalesce(func.sum(ActaOficialORM.blancos), 0))

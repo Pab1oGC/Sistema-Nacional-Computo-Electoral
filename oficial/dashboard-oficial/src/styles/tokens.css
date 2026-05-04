@@ -1,0 +1,18 @@
+:root {
+  /* Backgrounds */
+  --color-bg-page: #FAFBFC;
+  --color-bg-card: #FFFFFF;
+
+  /* Text */
+  --color-text-primary: #1A2332;
+  --color-text-secondary: #5A6478;
+
+  /* Borders */
+  --color-border: #E1E5EB;
+
+  /* Acentos institucional OEP Bolivia */
+  --color-accent-blue: #1E4A8C;
+  --color-accent-red: #C8102E;
+  --color-accent-green: #228B47;
+  --color-accent-yellow: #F4A261;
+}

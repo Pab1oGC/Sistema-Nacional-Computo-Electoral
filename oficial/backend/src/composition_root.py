@@ -17,6 +17,12 @@ from recuento_oficial.application.use_cases.consultar_avance_use_case import (
 from recuento_oficial.application.use_cases.consultar_replicacion_use_case import (
     ConsultarReplicacionUseCase,
 )
+from recuento_oficial.application.use_cases.consultar_resultados_por_departamento_use_case import (
+    ConsultarResultadosPorDepartamentoUseCase,
+)
+from recuento_oficial.application.use_cases.consultar_resultados_por_municipio_use_case import (
+    ConsultarResultadosPorMunicipioUseCase,
+)
 from recuento_oficial.application.use_cases.consultar_resultados_use_case import (
     ConsultarResultadosUseCase,
 )
@@ -111,6 +117,18 @@ def get_consultar_resultados_use_case(
     return ConsultarResultadosUseCase(acta_repo, partido_repo)
 
 
+def get_consultar_resultados_por_depto_use_case(
+    acta_repo: ActaRepoDep, partido_repo: PartidoRepoDep
+) -> ConsultarResultadosPorDepartamentoUseCase:
+    return ConsultarResultadosPorDepartamentoUseCase(acta_repo, partido_repo)
+
+
+def get_consultar_resultados_por_municipio_use_case(
+    acta_repo: ActaRepoDep, partido_repo: PartidoRepoDep
+) -> ConsultarResultadosPorMunicipioUseCase:
+    return ConsultarResultadosPorMunicipioUseCase(acta_repo, partido_repo)
+
+
 def get_consultar_avance_use_case(acta_repo: ActaRepoDep) -> ConsultarAvanceUseCase:
     return ConsultarAvanceUseCase(acta_repo)
 
@@ -146,6 +164,14 @@ RegistrarUseCaseDep = Annotated[
 ]
 ConsultarResultadosUseCaseDep = Annotated[
     ConsultarResultadosUseCase, Depends(get_consultar_resultados_use_case)
+]
+ConsultarResultadosPorDeptoUseCaseDep = Annotated[
+    ConsultarResultadosPorDepartamentoUseCase,
+    Depends(get_consultar_resultados_por_depto_use_case),
+]
+ConsultarResultadosPorMunicipioUseCaseDep = Annotated[
+    ConsultarResultadosPorMunicipioUseCase,
+    Depends(get_consultar_resultados_por_municipio_use_case),
 ]
 ConsultarAvanceUseCaseDep = Annotated[
     ConsultarAvanceUseCase, Depends(get_consultar_avance_use_case)
