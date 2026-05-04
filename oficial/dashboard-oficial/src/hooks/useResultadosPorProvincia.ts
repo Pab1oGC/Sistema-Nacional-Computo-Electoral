@@ -9,6 +9,9 @@ export function useResultadosPorProvincia(
     queryFn: () => getResultadosPorProvincia(codigoDepartamento as number),
     enabled: codigoDepartamento !== null,
     refetchInterval: 5000,
+    refetchIntervalInBackground: true,
     staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
   });
 }

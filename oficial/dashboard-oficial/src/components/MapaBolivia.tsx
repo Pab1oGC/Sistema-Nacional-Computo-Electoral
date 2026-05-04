@@ -1,9 +1,15 @@
 import 'leaflet/dist/leaflet.css';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { GeoJSON, MapContainer } from 'react-leaflet';
-import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from 'geojson';
-import type { Layer, LeafletMouseEvent, PathOptions } from 'leaflet';
+import { GeoJSON, MapContainer, useMap } from 'react-leaflet';
+import type {
+  Feature,
+  FeatureCollection,
+  GeoJsonProperties,
+  Geometry,
+} from 'geojson';
+import L from 'leaflet';
+import type { LatLngBoundsExpression, Layer, LeafletMouseEvent, PathOptions } from 'leaflet';
 import { useResultados } from '../hooks/useResultados';
 import { useResultadosPorDepto } from '../hooks/useResultadosPorDepto';
 import { useResultadosPorMunicipio } from '../hooks/useResultadosPorMunicipio';
@@ -14,15 +20,52 @@ import type {
   ProvinciaResultados,
 } from '../types/api';
 import {
-  DetalleTerritorioModal,
-  type DetalleTerritorioData,
-} from './DetalleTerritorioModal';
+  PanelLateralMapa,
+  type DetalleData,
+  type ItemListaTerritorio,
+} from './PanelLateralMapa';
 
 const COLOR_SIN_DATOS = '#cbd5e1';
-const CENTRO_BOLIVIA: [number, number] = [-16.5, -64.5];
-const ZOOM_NACIONAL = 5;
-const ZOOM_DEPTO = 7;
-const ZOOM_PROVINCIA = 8;
+const COLOR_HIGHLIGHT_STROKE = '#0ea5e9';
+
+// Colores de "contexto opacado": territorios fuera del foco actual.
+const COLOR_CONTEXT_DEPTOS = '#cbd5e1';     // slate-300 — deptos cuando no es el nivel activo
+const COLOR_CONTEXT_PROVS = '#94a3b8';      // slate-400 — provincias del depto cuando estamos en provincia
+const COLOR_CONTEXT_STROKE = '#64748b';     // slate-500
+
+// Bounds reales de Bolivia para el primer paint.
+const BOLIVIA_REAL_BOUNDS: LatLngBoundsExpression = [
+  [-22.9, -69.6],
+  [-9.7, -57.5],
+];
+
+// Bounds máximos de pan: el usuario puede arrastrar el mapa pero
+// nunca salirse de la región de Bolivia (con un margen mínimo).
+const MAX_BOUNDS: LatLngBoundsExpression = [
+  [-24, -71],
+  [-8, -55],
+];
+
+// Centro geográfico de Bolivia. Se usa como punto de referencia para
+// interpolar el centro del viewport al hacer zoom dinámico.
+const BOLIVIA_CENTER: [number, number] = [-16.29, -63.59];
+
+// Niveles de zoom por nivel de drill-down. Más zoom = más detalle.
+const ZOOM_BY_NIVEL: Record<'nacional' | 'departamento' | 'provincia', number> = {
+  nacional: 6,
+  departamento: 7,
+  provincia: 8,
+};
+
+// Interpolación 50% entre el centro de Bolivia y el centro del territorio
+// enfocado: el mapa se desplaza HACIA el territorio sin "escapar" de Bolivia.
+function interpolarCentro(
+  base: [number, number],
+  target: [number, number],
+  t: number,
+): [number, number] {
+  return [base[0] + (target[0] - base[0]) * t, base[1] + (target[1] - base[1]) * t];
+}
 
 interface PartidoMeta {
   sigla_candidato: string;
@@ -104,22 +147,90 @@ interface NivelProv {
 }
 type Nivel = NivelNacional | NivelDepto | NivelProv;
 
+// Helper: controla el zoom, centro y drag del mapa según el nivel actual.
+// - Nivel nacional: mapa fijo (no drag), bounds Bolivia entera.
+// - Niveles depto/provincia: drag habilitado pero limitado a maxBounds
+//   (el usuario puede mover pero no escapar de la región de Bolivia).
+function MapZoomController({
+  nivel,
+  targetCenter,
+}: {
+  nivel: 'nacional' | 'departamento' | 'provincia';
+  targetCenter: [number, number] | null;
+}): null {
+  const map = useMap();
+
+  // Primer paint: bounds Bolivia para llenar viewport
+  useEffect(() => {
+    map.fitBounds(BOLIVIA_REAL_BOUNDS, { padding: [4, 4], animate: false });
+    const t = window.setTimeout(() => {
+      map.invalidateSize();
+      map.fitBounds(BOLIVIA_REAL_BOUNDS, { padding: [4, 4], animate: false });
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [map]);
+
+  // Cambio de nivel → setView con zoom + centro interpolado, y
+  // enable/disable de dragging + maxBounds según corresponda.
+  useEffect(() => {
+    const targetZoom = ZOOM_BY_NIVEL[nivel];
+    const center =
+      nivel === 'nacional' || !targetCenter
+        ? BOLIVIA_CENTER
+        : interpolarCentro(BOLIVIA_CENTER, targetCenter, 0.5);
+    map.setView(center, targetZoom, {
+      animate: true,
+      duration: 0.6,
+      easeLinearity: 0.5,
+    });
+
+    // Drag + bounds según nivel
+    if (nivel === 'nacional') {
+      map.dragging.disable();
+      map.setMaxBounds(undefined as unknown as L.LatLngBounds);
+    } else {
+      map.dragging.enable();
+      map.setMaxBounds(MAX_BOUNDS as L.LatLngBoundsExpression);
+      map.options.maxBoundsViscosity = 1.0;
+    }
+  }, [map, nivel, targetCenter]);
+
+  return null;
+}
+
 export function MapaBolivia(): JSX.Element {
   const [nivel, setNivel] = useState<Nivel>({ modo: 'nacional' });
-  const [modal, setModal] = useState<DetalleTerritorioData | null>(null);
-  const [modalNivel, setModalNivel] = useState<'depto' | 'provincia' | 'municipio' | null>(null);
-  const [modalPayload, setModalPayload] = useState<
+
+  // Detalle del panel lateral
+  const [detalle, setDetalle] = useState<DetalleData | null>(null);
+  const [detalleNivel, setDetalleNivel] = useState<'depto' | 'provincia' | 'municipio' | null>(null);
+  const [detallePayload, setDetallePayload] = useState<
     DepartamentoResultados | ProvinciaResultados | MunicipioResultados | null
   >(null);
 
-  const { data: deptosResp } = useResultadosPorDepto();
+  // Highlight: id del feature seleccionado (para stroke grueso)
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+
+  const { data: deptosResp, dataUpdatedAt: deptosUpdatedAt } = useResultadosPorDepto();
   const { data: nacional } = useResultados();
-  const { data: provinciasResp } = useResultadosPorProvincia(
-    nivel.modo === 'departamento' || nivel.modo === 'provincia' ? nivel.codDepto : null,
-  );
-  const { data: municipiosResp } = useResultadosPorMunicipio(
-    nivel.modo === 'provincia' ? nivel.codDepto : null,
-  );
+  const { data: provinciasResp, dataUpdatedAt: provUpdatedAt } =
+    useResultadosPorProvincia(
+      nivel.modo === 'departamento' || nivel.modo === 'provincia'
+        ? nivel.codDepto
+        : null,
+    );
+  const { data: municipiosResp, dataUpdatedAt: muniUpdatedAt } =
+    useResultadosPorMunicipio(
+      nivel.modo === 'provincia' ? nivel.codDepto : null,
+    );
+
+  // Single source para forzar remount del GeoJSON cuando llegan datos nuevos.
+  const dataUpdatedAt =
+    nivel.modo === 'nacional'
+      ? deptosUpdatedAt
+      : nivel.modo === 'departamento'
+        ? provUpdatedAt
+        : muniUpdatedAt;
 
   const { data: geoDeptos, isLoading: loadingGeoDeptos } = useGeoDeptos();
   const { data: geoProvincias, isLoading: loadingGeoProvincias } = useGeoProvincias(
@@ -129,7 +240,6 @@ export function MapaBolivia(): JSX.Element {
     nivel.modo === 'provincia',
   );
 
-  // Lookup partidos: del API de resultados nacionales
   const partidosMeta = useMemo<ReadonlyArray<PartidoMeta>>(() => {
     if (!nacional) return PARTIDOS_FALLBACK;
     return nacional.candidatos.map((c) => ({
@@ -140,7 +250,6 @@ export function MapaBolivia(): JSX.Element {
     }));
   }, [nacional]);
 
-  // Index de resultados por nombre normalizado para matching con GeoJSON
   const deptosByNombre = useMemo(() => {
     const map = new Map<string, DepartamentoResultados>();
     if (deptosResp) for (const d of deptosResp.departamentos) {
@@ -165,20 +274,20 @@ export function MapaBolivia(): JSX.Element {
     return map;
   }, [municipiosResp]);
 
-  // Filtros de GeoJSON según nivel
-  const geoFiltrado = useMemo<FeatureCollection | null>(() => {
-    if (nivel.modo === 'nacional') return geoDeptos ?? null;
-    if (nivel.modo === 'departamento') {
-      if (!geoProvincias) return null;
-      return {
-        type: 'FeatureCollection',
-        features: geoProvincias.features.filter(
-          (f) => Number(f.properties?.codigo_departamento) === nivel.codDepto,
-        ),
-      };
-    }
-    // provincia: filtrar municipios por NAME_2 (normalizado) == nombreProvincia
-    if (!geoMunicipios) return null;
+  // Provincias filtradas al depto enfocado (cuando hay uno).
+  const geoProvinciasFiltrado = useMemo<FeatureCollection | null>(() => {
+    if (nivel.modo === 'nacional' || !geoProvincias) return null;
+    return {
+      type: 'FeatureCollection',
+      features: geoProvincias.features.filter(
+        (f) => Number(f.properties?.codigo_departamento) === nivel.codDepto,
+      ),
+    };
+  }, [nivel, geoProvincias]);
+
+  // Municipios filtrados a la provincia enfocada (cuando estamos en provincia).
+  const geoMunicipiosFiltrado = useMemo<FeatureCollection | null>(() => {
+    if (nivel.modo !== 'provincia' || !geoMunicipios) return null;
     const objetivoProv = normalizar(nivel.nombreProvincia);
     const objetivoDepto = normalizar(nivel.nombreDepto);
     return {
@@ -187,71 +296,196 @@ export function MapaBolivia(): JSX.Element {
         const name1 = String(f.properties?.NAME_1 ?? '');
         const name2 = String(f.properties?.NAME_2 ?? '');
         return (
-          normalizar(name1) === objetivoDepto && normalizar(name2) === objetivoProv
+          normalizar(name1) === objetivoDepto &&
+          normalizar(name2) === objetivoProv
         );
       }),
     };
-  }, [nivel, geoDeptos, geoProvincias, geoMunicipios]);
+  }, [nivel, geoMunicipios]);
 
-  // Style por feature
-  const styleFeature = useCallback(
+  // Set de nombres normalizados de municipios pertenecientes a la
+  // provincia enfocada. Necesario para filtrar la lista del panel,
+  // porque el endpoint /resultados/por-municipio devuelve TODOS los
+  // municipios del depto sin distinguir provincia.
+  const nombresMunicipiosDeProvincia = useMemo<Set<string> | null>(() => {
+    if (!geoMunicipiosFiltrado) return null;
+    const s = new Set<string>();
+    for (const f of geoMunicipiosFiltrado.features) {
+      const nombre = String(f.properties?.NAME_3 ?? '');
+      if (nombre) s.add(normalizar(nombre));
+    }
+    return s;
+  }, [geoMunicipiosFiltrado]);
+
+  // Centro geográfico del territorio enfocado (depto o provincia). Se
+  // pasa al MapZoomController para interpolar el centro del viewport.
+  const targetCenter = useMemo<[number, number] | null>(() => {
+    if (nivel.modo === 'nacional') return null;
+    let geo: FeatureCollection | null = null;
+    if (nivel.modo === 'departamento') {
+      // Bounds del depto = bounds de sus provincias dissolved
+      geo = geoProvinciasFiltrado;
+    } else {
+      geo = geoMunicipiosFiltrado;
+    }
+    if (!geo || geo.features.length === 0) return null;
+    const layer = L.geoJSON(geo);
+    const bounds = layer.getBounds();
+    if (!bounds.isValid()) return null;
+    const c = bounds.getCenter();
+    return [c.lat, c.lng];
+  }, [nivel, geoProvinciasFiltrado, geoMunicipiosFiltrado]);
+
+  // ─────────────────────────────────────────────────────────────────
+  // Estilos por capa
+  // ─────────────────────────────────────────────────────────────────
+
+  // Capa de DEPTOS:
+  // - Si nivel='nacional': capa activa, color por ganador, clickeable.
+  // - Si nivel='depto'/'provincia': capa de contexto, gris claro, no
+  //   clickeable. El depto enfocado queda visualmente "tapado" por la
+  //   capa de provincias encima.
+  const styleDepto = useCallback(
     (feature?: Feature<Geometry, GeoJsonProperties>): PathOptions => {
       if (!feature) return { fillColor: COLOR_SIN_DATOS, weight: 1, color: '#000', fillOpacity: 0.2 };
-      let reg: { ganador: { color_hex: string } | null; resultados_candidatos: { porcentaje: number }[] } | undefined;
-      if (nivel.modo === 'nacional') {
-        const nombre = String(feature.properties?.NOM_DEP ?? '');
-        reg = deptosByNombre.get(normalizar(nombre));
-      } else if (nivel.modo === 'departamento') {
-        const nombre = String(feature.properties?.nombre ?? '');
-        reg = provinciasByNombre.get(normalizar(nombre));
-      } else {
-        const nombre = String(feature.properties?.NAME_3 ?? '');
-        reg = municipiosByNombre.get(normalizar(nombre));
+      const nombre = String(feature.properties?.NOM_DEP ?? '');
+      const norm = normalizar(nombre);
+
+      // En niveles más profundos, los deptos son contexto opacado.
+      if (nivel.modo !== 'nacional') {
+        return {
+          fillColor: COLOR_CONTEXT_DEPTOS,
+          fillOpacity: 0.35,
+          color: COLOR_CONTEXT_STROKE,
+          weight: 0.8,
+          opacity: 0.7,
+        };
       }
+
+      // Nivel nacional: color por ganador, full opacidad.
+      const reg = deptosByNombre.get(norm);
+      const isHighlighted = highlightedKey === `dep-${norm}`;
       if (!reg || !reg.ganador) {
         return {
           fillColor: COLOR_SIN_DATOS,
-          weight: nivel.modo === 'nacional' ? 1.5 : 1,
-          color: '#000',
-          fillOpacity: 0.2,
+          weight: isHighlighted ? 3 : 1.5,
+          color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
+          fillOpacity: 0.4,
           opacity: 1,
         };
       }
       return {
         fillColor: reg.ganador.color_hex,
-        weight: nivel.modo === 'nacional' ? 1.5 : 1,
-        color: '#000',
+        weight: isHighlighted ? 3 : 1.5,
+        color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
         fillOpacity: calcularOpacidad(calcularMargen(reg)),
         opacity: 1,
       };
     },
-    [nivel, deptosByNombre, provinciasByNombre, municipiosByNombre],
+    [nivel, deptosByNombre, highlightedKey],
   );
 
-  // Click → modal
-  const abrirModalDepto = useCallback(
-    (depto: DepartamentoResultados) => {
-      setModalNivel('depto');
-      setModalPayload(depto);
-      setModal({
-        nombre: depto.nombre_departamento,
-        contexto: 'Departamento · Bolivia',
-        totalMesas: depto.total_mesas_depto,
-        actasValidadas: depto.actas_validadas_depto,
-        porcentajeAvance: depto.porcentaje_avance_depto,
-        ganador: depto.ganador,
-        resultadosCandidatos: depto.resultados_candidatos,
-        drillDownLabel: 'Ver provincias',
-      });
+  // Capa de PROVINCIAS (solo cuando hay depto enfocado):
+  // - Si nivel='depto': capa activa, color por ganador, clickeable.
+  // - Si nivel='provincia': capa de contexto provincia-medio. La
+  //   provincia enfocada queda tapada por sus municipios encima.
+  const styleProvincia = useCallback(
+    (feature?: Feature<Geometry, GeoJsonProperties>): PathOptions => {
+      if (!feature) return { fillColor: COLOR_SIN_DATOS, weight: 1, color: '#000', fillOpacity: 0.2 };
+      const nombre = String(feature.properties?.nombre ?? '');
+      const norm = normalizar(nombre);
+
+      if (nivel.modo === 'provincia') {
+        return {
+          fillColor: COLOR_CONTEXT_PROVS,
+          fillOpacity: 0.35,
+          color: COLOR_CONTEXT_STROKE,
+          weight: 0.7,
+          opacity: 0.8,
+        };
+      }
+
+      // Nivel departamento: capa activa.
+      const reg = provinciasByNombre.get(norm);
+      const isHighlighted = highlightedKey === `prov-${norm}`;
+      if (!reg || !reg.ganador) {
+        return {
+          fillColor: COLOR_SIN_DATOS,
+          weight: isHighlighted ? 3 : 1,
+          color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
+          fillOpacity: 0.4,
+          opacity: 1,
+        };
+      }
+      return {
+        fillColor: reg.ganador.color_hex,
+        weight: isHighlighted ? 3 : 1,
+        color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
+        fillOpacity: calcularOpacidad(calcularMargen(reg)),
+        opacity: 1,
+      };
     },
-    [],
+    [nivel, provinciasByNombre, highlightedKey],
   );
 
-  const abrirModalProvincia = useCallback(
+  // Capa de MUNICIPIOS (solo nivel='provincia'): siempre activa, color
+  // por ganador, clickeable.
+  const styleMunicipio = useCallback(
+    (feature?: Feature<Geometry, GeoJsonProperties>): PathOptions => {
+      if (!feature) return { fillColor: COLOR_SIN_DATOS, weight: 1, color: '#000', fillOpacity: 0.2 };
+      const nombre = String(feature.properties?.NAME_3 ?? '');
+      const norm = normalizar(nombre);
+      const reg = municipiosByNombre.get(norm);
+      const isHighlighted = highlightedKey === `muni-${norm}`;
+      if (!reg || !reg.ganador) {
+        return {
+          fillColor: COLOR_SIN_DATOS,
+          weight: isHighlighted ? 3 : 1,
+          color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
+          fillOpacity: 0.4,
+          opacity: 1,
+        };
+      }
+      return {
+        fillColor: reg.ganador.color_hex,
+        weight: isHighlighted ? 3 : 1,
+        color: isHighlighted ? COLOR_HIGHLIGHT_STROKE : '#000',
+        fillOpacity: calcularOpacidad(calcularMargen(reg)),
+        opacity: 1,
+      };
+    },
+    [municipiosByNombre, highlightedKey],
+  );
+
+  const cerrarDetalle = useCallback(() => {
+    setDetalle(null);
+    setDetalleNivel(null);
+    setDetallePayload(null);
+    setHighlightedKey(null);
+  }, []);
+
+  const abrirDetalleDepto = useCallback((depto: DepartamentoResultados) => {
+    setDetalleNivel('depto');
+    setDetallePayload(depto);
+    setHighlightedKey(`dep-${normalizar(depto.nombre_departamento)}`);
+    setDetalle({
+      nombre: depto.nombre_departamento,
+      contexto: 'Departamento · Bolivia',
+      totalMesas: depto.total_mesas_depto,
+      actasValidadas: depto.actas_validadas_depto,
+      porcentajeAvance: depto.porcentaje_avance_depto,
+      ganador: depto.ganador,
+      resultadosCandidatos: depto.resultados_candidatos,
+      drillDownLabel: 'Ver provincias',
+    });
+  }, []);
+
+  const abrirDetalleProvincia = useCallback(
     (prov: ProvinciaResultados, nombreDepto: string) => {
-      setModalNivel('provincia');
-      setModalPayload(prov);
-      setModal({
+      setDetalleNivel('provincia');
+      setDetallePayload(prov);
+      setHighlightedKey(`prov-${normalizar(prov.nombre_provincia)}`);
+      setDetalle({
         nombre: prov.nombre_provincia,
         contexto: `Provincia · ${nombreDepto}`,
         totalMesas: prov.total_mesas_provincia,
@@ -265,11 +499,12 @@ export function MapaBolivia(): JSX.Element {
     [],
   );
 
-  const abrirModalMunicipio = useCallback(
+  const abrirDetalleMunicipio = useCallback(
     (muni: MunicipioResultados, nombreProv: string, nombreDepto: string) => {
-      setModalNivel('municipio');
-      setModalPayload(muni);
-      setModal({
+      setDetalleNivel('municipio');
+      setDetallePayload(muni);
+      setHighlightedKey(`muni-${normalizar(muni.nombre_municipio)}`);
+      setDetalle({
         nombre: muni.nombre_municipio,
         contexto: `Municipio · ${nombreProv} · ${nombreDepto}`,
         totalMesas: muni.total_mesas_municipio,
@@ -284,15 +519,19 @@ export function MapaBolivia(): JSX.Element {
   );
 
   const handleDrillDown = useCallback(() => {
-    if (modalNivel === 'depto' && modalPayload) {
-      const depto = modalPayload as DepartamentoResultados;
+    if (detalleNivel === 'depto' && detallePayload) {
+      const depto = detallePayload as DepartamentoResultados;
       setNivel({
         modo: 'departamento',
         codDepto: depto.id_departamento,
         nombreDepto: depto.nombre_departamento,
       });
-    } else if (modalNivel === 'provincia' && modalPayload && nivel.modo !== 'nacional') {
-      const prov = modalPayload as ProvinciaResultados;
+    } else if (
+      detalleNivel === 'provincia' &&
+      detallePayload &&
+      nivel.modo !== 'nacional'
+    ) {
+      const prov = detallePayload as ProvinciaResultados;
       setNivel({
         modo: 'provincia',
         codDepto: nivel.codDepto,
@@ -301,57 +540,40 @@ export function MapaBolivia(): JSX.Element {
         nombreProvincia: prov.nombre_provincia,
       });
     }
-    setModal(null);
-    setModalNivel(null);
-    setModalPayload(null);
-  }, [modalNivel, modalPayload, nivel]);
+    cerrarDetalle();
+  }, [detalleNivel, detallePayload, nivel, cerrarDetalle]);
 
-  // onEachFeature: tooltip + click
-  const onEachFeature = useCallback(
+  // onEachFeature por capa. Solo la capa "activa" del nivel actual tiene
+  // handlers (click + hover); las capas de contexto son visuales nada más.
+
+  const onEachDepto = useCallback(
     (feature: Feature, layer: Layer): void => {
-      let nombre = '';
-      let textoTooltip = '';
-      let clickHandler: (() => void) | null = null;
-
-      if (nivel.modo === 'nacional') {
-        nombre = String(feature.properties?.NOM_DEP ?? '');
-        const depto = deptosByNombre.get(normalizar(nombre));
-        textoTooltip = depto?.ganador
-          ? `<strong>${nombre}</strong><br/>` +
-            `Ganador: ${depto.ganador.sigla_partido} (${depto.ganador.porcentaje.toFixed(1)}%)<br/>` +
-            `Avance: ${depto.actas_validadas_depto}/${depto.total_mesas_depto} ` +
-            `(${depto.porcentaje_avance_depto.toFixed(1)}%)`
-          : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
-        if (depto) clickHandler = () => abrirModalDepto(depto);
-      } else if (nivel.modo === 'departamento') {
-        nombre = String(feature.properties?.nombre ?? '');
-        const prov = provinciasByNombre.get(normalizar(nombre));
-        textoTooltip = prov?.ganador
-          ? `<strong>${nombre}</strong><br/>` +
-            `Ganador: ${prov.ganador.sigla_partido} (${prov.ganador.porcentaje.toFixed(1)}%)<br/>` +
-            `Avance: ${prov.actas_validadas_provincia}/${prov.total_mesas_provincia} ` +
-            `(${prov.porcentaje_avance_provincia.toFixed(1)}%)`
-          : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
-        if (prov) clickHandler = () => abrirModalProvincia(prov, nivel.nombreDepto);
-      } else {
-        nombre = String(feature.properties?.NAME_3 ?? '');
-        const muni = municipiosByNombre.get(normalizar(nombre));
-        textoTooltip = muni?.ganador
-          ? `<strong>${nombre}</strong><br/>` +
-            `Ganador: ${muni.ganador.sigla_partido} (${muni.ganador.porcentaje.toFixed(1)}%)<br/>` +
-            `Avance: ${muni.actas_validadas_municipio}/${muni.total_mesas_municipio} ` +
-            `(${muni.porcentaje_avance_municipio.toFixed(1)}%)`
-          : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
-        if (muni) clickHandler = () => abrirModalMunicipio(muni, nivel.nombreProvincia, nivel.nombreDepto);
-      }
-
-      // Tooltip permanente para deptos, hover-only para niveles más finos
-      const permanent = nivel.modo === 'nacional';
-      layer.bindTooltip(textoTooltip, { sticky: !permanent, permanent, direction: 'center' });
-
+      const nombre = String(feature.properties?.NOM_DEP ?? '');
+      const depto = deptosByNombre.get(normalizar(nombre));
+      const tooltip = depto?.ganador
+        ? `<strong>${nombre}</strong><br/>` +
+          `Ganador: ${depto.ganador.sigla_partido} (${depto.ganador.porcentaje.toFixed(1)}%)<br/>` +
+          `Avance: ${depto.actas_validadas_depto}/${depto.total_mesas_depto} ` +
+          `(${depto.porcentaje_avance_depto.toFixed(1)}%)`
+        : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
+      layer.bindTooltip(tooltip, { sticky: true, direction: 'top' });
       layer.on({
         click: () => {
-          if (clickHandler) clickHandler();
+          if (!depto) return;
+          // En nivel nacional → abrir detalle
+          // En niveles más profundos → cambiar al depto clickeado
+          // (incluye click en el depto actual, que pasa a nivel
+          // 'departamento' descartando la provincia activa).
+          if (nivel.modo === 'nacional') {
+            abrirDetalleDepto(depto);
+          } else {
+            cerrarDetalle();
+            setNivel({
+              modo: 'departamento',
+              codDepto: depto.id_departamento,
+              nombreDepto: depto.nombre_departamento,
+            });
+          }
         },
         mouseover: (e: LeafletMouseEvent) => {
           const path = e.target as { setStyle?: (s: PathOptions) => void };
@@ -360,24 +582,203 @@ export function MapaBolivia(): JSX.Element {
         mouseout: (e: LeafletMouseEvent) => {
           const path = e.target as { setStyle?: (s: PathOptions) => void };
           path.setStyle?.({
-            weight: nivel.modo === 'nacional' ? 1.5 : 1,
-            color: '#000',
+            weight: nivel.modo === 'nacional' ? 1.5 : 0.8,
+            color: nivel.modo === 'nacional' ? '#000' : COLOR_CONTEXT_STROKE,
           });
         },
       });
     },
-    [nivel, deptosByNombre, provinciasByNombre, municipiosByNombre, abrirModalDepto, abrirModalProvincia, abrirModalMunicipio],
+    [nivel, deptosByNombre, abrirDetalleDepto, cerrarDetalle],
+  );
+
+  const onEachProvincia = useCallback(
+    (feature: Feature, layer: Layer): void => {
+      if (nivel.modo === 'nacional') return;
+      const nombre = String(feature.properties?.nombre ?? '');
+      const prov = provinciasByNombre.get(normalizar(nombre));
+      const tooltip = prov?.ganador
+        ? `<strong>${nombre}</strong><br/>` +
+          `Ganador: ${prov.ganador.sigla_partido} (${prov.ganador.porcentaje.toFixed(1)}%)<br/>` +
+          `Avance: ${prov.actas_validadas_provincia}/${prov.total_mesas_provincia} ` +
+          `(${prov.porcentaje_avance_provincia.toFixed(1)}%)`
+        : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
+      layer.bindTooltip(tooltip, { sticky: true, direction: 'center' });
+      layer.on({
+        click: () => {
+          if (!prov) return;
+          if (nivel.modo === 'departamento') {
+            abrirDetalleProvincia(prov, nivel.nombreDepto);
+          } else if (nivel.modo === 'provincia') {
+            // Cambiar a la provincia clickeada (ya estamos en nivel
+            // provincia, las otras provincias del mismo depto siguen
+            // visibles como contexto y son clickeables).
+            cerrarDetalle();
+            setNivel({
+              modo: 'provincia',
+              codDepto: nivel.codDepto,
+              nombreDepto: nivel.nombreDepto,
+              codProvincia: prov.codigo_provincia,
+              nombreProvincia: prov.nombre_provincia,
+            });
+          }
+        },
+        mouseover: (e: LeafletMouseEvent) => {
+          const path = e.target as { setStyle?: (s: PathOptions) => void };
+          path.setStyle?.({ weight: 3, color: '#1A2332' });
+        },
+        mouseout: (e: LeafletMouseEvent) => {
+          const path = e.target as { setStyle?: (s: PathOptions) => void };
+          path.setStyle?.({
+            weight: nivel.modo === 'departamento' ? 1 : 0.7,
+            color: nivel.modo === 'departamento' ? '#000' : COLOR_CONTEXT_STROKE,
+          });
+        },
+      });
+    },
+    [nivel, provinciasByNombre, abrirDetalleProvincia, cerrarDetalle],
+  );
+
+  const onEachMunicipio = useCallback(
+    (feature: Feature, layer: Layer): void => {
+      if (nivel.modo !== 'provincia') return;
+      const nombre = String(feature.properties?.NAME_3 ?? '');
+      const muni = municipiosByNombre.get(normalizar(nombre));
+      const tooltip = muni?.ganador
+        ? `<strong>${nombre}</strong><br/>` +
+          `Ganador: ${muni.ganador.sigla_partido} (${muni.ganador.porcentaje.toFixed(1)}%)<br/>` +
+          `Avance: ${muni.actas_validadas_municipio}/${muni.total_mesas_municipio} ` +
+          `(${muni.porcentaje_avance_municipio.toFixed(1)}%)`
+        : `<strong>${nombre}</strong><br/>Sin actas procesadas`;
+      layer.bindTooltip(tooltip, { sticky: true, direction: 'center' });
+      layer.on({
+        click: () => {
+          if (muni && nivel.modo === 'provincia')
+            abrirDetalleMunicipio(muni, nivel.nombreProvincia, nivel.nombreDepto);
+        },
+        mouseover: (e: LeafletMouseEvent) => {
+          const path = e.target as { setStyle?: (s: PathOptions) => void };
+          path.setStyle?.({ weight: 3, color: '#1A2332' });
+        },
+        mouseout: (e: LeafletMouseEvent) => {
+          const path = e.target as { setStyle?: (s: PathOptions) => void };
+          path.setStyle?.({ weight: 1, color: '#000' });
+        },
+      });
+    },
+    [nivel, municipiosByNombre, abrirDetalleMunicipio],
   );
 
   const cargandoNivel =
-    (nivel.modo === 'nacional' && (loadingGeoDeptos || !deptosResp)) ||
-    (nivel.modo === 'departamento' && (loadingGeoProvincias || !provinciasResp)) ||
+    loadingGeoDeptos ||
+    !deptosResp ||
+    (nivel.modo !== 'nacional' && (loadingGeoProvincias || !provinciasResp)) ||
     (nivel.modo === 'provincia' && (loadingGeoMunicipios || !municipiosResp));
 
-  const zoom =
-    nivel.modo === 'nacional' ? ZOOM_NACIONAL :
-    nivel.modo === 'departamento' ? ZOOM_DEPTO :
-    ZOOM_PROVINCIA;
+  // Items de la lista del panel lateral según nivel.
+  const itemsLista = useMemo<ItemListaTerritorio[]>(() => {
+    if (nivel.modo === 'nacional' && deptosResp) {
+      return deptosResp.departamentos.map((d) => ({
+        id: `dep-${d.id_departamento}`,
+        nombre: d.nombre_departamento,
+        ganador: d.ganador,
+        porcentajeAvance: d.porcentaje_avance_depto,
+        actasValidadas: d.actas_validadas_depto,
+        totalMesas: d.total_mesas_depto,
+      }));
+    }
+    if (nivel.modo === 'departamento' && provinciasResp) {
+      return provinciasResp.provincias.map((p) => ({
+        id: `prov-${p.codigo_provincia}`,
+        nombre: p.nombre_provincia,
+        ganador: p.ganador,
+        porcentajeAvance: p.porcentaje_avance_provincia,
+        actasValidadas: p.actas_validadas_provincia,
+        totalMesas: p.total_mesas_provincia,
+      }));
+    }
+    if (nivel.modo === 'provincia' && municipiosResp) {
+      // El endpoint /por-municipio devuelve TODOS los municipios del depto.
+      // Cruzamos con el set derivado del GeoJSON filtrado por (depto, provincia)
+      // para mostrar solo los de la provincia enfocada.
+      return municipiosResp.municipios
+        .filter((m) => {
+          if (!nombresMunicipiosDeProvincia) return false;
+          return nombresMunicipiosDeProvincia.has(normalizar(m.nombre_municipio));
+        })
+        .map((m) => ({
+          id: `muni-${m.codigo_municipio}`,
+          nombre: m.nombre_municipio,
+          ganador: m.ganador,
+          porcentajeAvance: m.porcentaje_avance_municipio,
+          actasValidadas: m.actas_validadas_municipio,
+          totalMesas: m.total_mesas_municipio,
+        }));
+    }
+    return [];
+  }, [nivel, deptosResp, provinciasResp, municipiosResp, nombresMunicipiosDeProvincia]);
+
+  const handleSelectItemLista = useCallback(
+    (id: string) => {
+      if (nivel.modo === 'nacional' && deptosResp) {
+        const codDepto = Number(id.replace('dep-', ''));
+        const depto = deptosResp.departamentos.find(
+          (d) => d.id_departamento === codDepto,
+        );
+        if (depto) abrirDetalleDepto(depto);
+      } else if (nivel.modo === 'departamento' && provinciasResp) {
+        const codProv = id.replace('prov-', '');
+        const prov = provinciasResp.provincias.find(
+          (p) => p.codigo_provincia === codProv,
+        );
+        if (prov) abrirDetalleProvincia(prov, nivel.nombreDepto);
+      } else if (nivel.modo === 'provincia' && municipiosResp) {
+        const codMuni = id.replace('muni-', '');
+        const muni = municipiosResp.municipios.find(
+          (m) => m.codigo_municipio === codMuni,
+        );
+        if (muni)
+          abrirDetalleMunicipio(muni, nivel.nombreProvincia, nivel.nombreDepto);
+      }
+    },
+    [
+      nivel,
+      deptosResp,
+      provinciasResp,
+      municipiosResp,
+      abrirDetalleDepto,
+      abrirDetalleProvincia,
+      abrirDetalleMunicipio,
+    ],
+  );
+
+  const nivelLabel =
+    nivel.modo === 'nacional'
+      ? 'Departamentos'
+      : nivel.modo === 'departamento'
+        ? `Provincias de ${nivel.nombreDepto}`
+        : `Municipios de ${nivel.nombreProvincia}`;
+  const contextoLabel =
+    nivel.modo === 'nacional'
+      ? 'Bolivia · Nivel nacional'
+      : nivel.modo === 'departamento'
+        ? `${nivel.nombreDepto} · Bolivia`
+        : `${nivel.nombreProvincia} · ${nivel.nombreDepto}`;
+
+  const handleBreadcrumbBolivia = useCallback(() => {
+    cerrarDetalle();
+    setNivel({ modo: 'nacional' });
+  }, [cerrarDetalle]);
+
+  const handleBreadcrumbDepto = useCallback(() => {
+    if (nivel.modo === 'provincia') {
+      cerrarDetalle();
+      setNivel({
+        modo: 'departamento',
+        codDepto: nivel.codDepto,
+        nombreDepto: nivel.nombreDepto,
+      });
+    }
+  }, [nivel, cerrarDetalle]);
 
   return (
     <section aria-labelledby="mapa-titulo">
@@ -385,8 +786,9 @@ export function MapaBolivia(): JSX.Element {
         Mapa Electoral de Bolivia
       </h2>
       <p className="text-sm text-oficial-text-secondary mb-4">
-        Cada territorio se colorea según el partido ganador. La intensidad refleja
-        el margen de victoria. Click sobre un territorio abre el detalle.
+        Cada territorio se colorea según el partido ganador. La intensidad
+        refleja el margen de victoria. Click sobre un territorio abre el
+        detalle.
       </p>
 
       {/* Breadcrumb */}
@@ -396,7 +798,7 @@ export function MapaBolivia(): JSX.Element {
       >
         <button
           type="button"
-          onClick={() => setNivel({ modo: 'nacional' })}
+          onClick={handleBreadcrumbBolivia}
           disabled={nivel.modo === 'nacional'}
           className={
             nivel.modo === 'nacional'
@@ -411,13 +813,7 @@ export function MapaBolivia(): JSX.Element {
             <span className="text-oficial-text-secondary">›</span>
             <button
               type="button"
-              onClick={() =>
-                setNivel({
-                  modo: 'departamento',
-                  codDepto: nivel.codDepto,
-                  nombreDepto: nivel.nombreDepto,
-                })
-              }
+              onClick={handleBreadcrumbDepto}
               disabled={nivel.modo === 'departamento'}
               className={
                 nivel.modo === 'departamento'
@@ -441,6 +837,7 @@ export function MapaBolivia(): JSX.Element {
           <button
             type="button"
             onClick={() => {
+              cerrarDetalle();
               if (nivel.modo === 'provincia') {
                 setNivel({
                   modo: 'departamento',
@@ -458,43 +855,79 @@ export function MapaBolivia(): JSX.Element {
         )}
       </nav>
 
-      <div className="bg-white border border-oficial-border border-t-0 rounded-b-lg p-2">
-        {cargandoNivel || !geoFiltrado ? (
-          <div
-            className="h-[600px] bg-oficial-bg rounded animate-pulse"
-            aria-hidden="true"
-          />
-        ) : (
-          <MapContainer
-            key={`${nivel.modo}-${'codDepto' in nivel ? nivel.codDepto : ''}-${'codProvincia' in nivel ? nivel.codProvincia : ''}`}
-            center={CENTRO_BOLIVIA}
-            zoom={zoom}
-            scrollWheelZoom={false}
-            style={{ height: '600px', width: '100%', borderRadius: '6px', backgroundColor: '#f8fafc' }}
-          >
-            <GeoJSON
-              key={`features-${nivel.modo}`}
-              data={geoFiltrado}
-              style={styleFeature}
-              onEachFeature={onEachFeature}
-            />
-          </MapContainer>
-        )}
-        <Leyenda partidos={partidosMeta} />
-      </div>
+      <div className="bg-white border border-oficial-border border-t-0 rounded-b-lg overflow-hidden">
+        <div className="flex flex-col lg:flex-row">
+          {/* Mapa: ocupa todo el ancho disponible del lado izquierdo */}
+          <div className="flex-1 min-w-0 p-2">
+            {cargandoNivel ? (
+              <div
+                className="h-[680px] bg-oficial-bg rounded animate-pulse"
+                aria-hidden="true"
+              />
+            ) : (
+              <MapContainer
+                bounds={BOLIVIA_REAL_BOUNDS}
+                // En nivel nacional el mapa está fijo; en niveles más
+                // profundos MapZoomController habilita drag y aplica
+                // maxBounds. Zoom manual deshabilitado siempre — el
+                // zoom se controla por el nivel del drill-down.
+                scrollWheelZoom={false}
+                zoomControl={false}
+                doubleClickZoom={false}
+                touchZoom={false}
+                keyboard={false}
+                style={{
+                  height: '680px',
+                  width: '100%',
+                  borderRadius: '6px',
+                  backgroundColor: '#f8fafc',
+                }}
+              >
+                <MapZoomController nivel={nivel.modo} targetCenter={targetCenter} />
+                {geoDeptos && (
+                  <GeoJSON
+                    key={`deptos-${nivel.modo}-${highlightedKey ?? ''}-${nivel.modo === 'nacional' ? dataUpdatedAt : ''}`}
+                    data={geoDeptos}
+                    style={styleDepto}
+                    onEachFeature={onEachDepto}
+                    interactive={true}
+                  />
+                )}
+                {geoProvinciasFiltrado && (
+                  <GeoJSON
+                    key={`provs-${nivel.modo}-${'codDepto' in nivel ? nivel.codDepto : ''}-${highlightedKey ?? ''}-${nivel.modo === 'departamento' ? dataUpdatedAt : ''}`}
+                    data={geoProvinciasFiltrado}
+                    style={styleProvincia}
+                    onEachFeature={onEachProvincia}
+                    interactive={true}
+                  />
+                )}
+                {geoMunicipiosFiltrado && (
+                  <GeoJSON
+                    key={`munis-${'codProvincia' in nivel ? nivel.codProvincia : ''}-${highlightedKey ?? ''}-${dataUpdatedAt}`}
+                    data={geoMunicipiosFiltrado}
+                    style={styleMunicipio}
+                    onEachFeature={onEachMunicipio}
+                  />
+                )}
+              </MapContainer>
+            )}
+            <Leyenda partidos={partidosMeta} />
+          </div>
 
-      {modal && (
-        <DetalleTerritorioModal
-          data={modal}
-          partidosMeta={partidosMeta}
-          onClose={() => {
-            setModal(null);
-            setModalNivel(null);
-            setModalPayload(null);
-          }}
-          onDrillDown={modal.drillDownLabel ? handleDrillDown : undefined}
-        />
-      )}
+          {/* Panel lateral: lista del nivel actual, o detalle al click */}
+          <PanelLateralMapa
+            nivelLabel={nivelLabel}
+            contextoLabel={contextoLabel}
+            itemsLista={itemsLista}
+            detalle={detalle}
+            partidosMeta={partidosMeta}
+            onSelectItem={handleSelectItemLista}
+            onCerrarDetalle={cerrarDetalle}
+            onDrillDown={detalle?.drillDownLabel ? handleDrillDown : undefined}
+          />
+        </div>
+      </div>
     </section>
   );
 }

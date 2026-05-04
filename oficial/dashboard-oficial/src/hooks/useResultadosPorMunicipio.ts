@@ -7,6 +7,9 @@ export function useResultadosPorMunicipio(codigoDepartamento: number | null) {
     queryFn: () => getResultadosPorMunicipio(codigoDepartamento as number),
     enabled: codigoDepartamento !== null,
     refetchInterval: 5000,
+    refetchIntervalInBackground: true,
     staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
   });
 }

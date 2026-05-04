@@ -5,6 +5,10 @@ export function useResultadosPorDepto() {
   return useQuery({
     queryKey: ['resultados-por-depto'],
     queryFn: getResultadosPorDepartamento,
-    refetchInterval: 10000,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
   });
 }

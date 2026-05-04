@@ -27,6 +27,10 @@ export function useInconsistencias(): InconsistenciasResumen {
       queryKey: ['inconsistencias', tipo],
       queryFn: () => getInconsistenciasPorTipo(tipo),
       refetchInterval: 15000,
+      refetchIntervalInBackground: true,
+      staleTime: 0,
+      refetchOnWindowFocus: false,
+      refetchOnMount: 'always' as const,
     })),
   });
 

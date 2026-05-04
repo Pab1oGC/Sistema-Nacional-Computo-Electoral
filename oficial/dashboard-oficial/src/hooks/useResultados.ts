@@ -6,5 +6,9 @@ export function useResultados() {
     queryKey: ['resultados'],
     queryFn: getResultados,
     refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
   });
 }

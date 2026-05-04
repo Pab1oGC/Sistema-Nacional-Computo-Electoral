@@ -6,5 +6,9 @@ export function useAvance() {
     queryKey: ['avance'],
     queryFn: getAvance,
     refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
   });
 }
