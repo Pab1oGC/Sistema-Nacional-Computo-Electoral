@@ -24,7 +24,10 @@ from recuento_oficial.presentation.api.v1.replicacion_router import (
 from recuento_oficial.presentation.api.v1.resultados_router import (
     router as resultados_router,
 )
-from shared.infrastructure.database.session import get_engine
+from shared.infrastructure.database.session import (
+    get_engine,
+    get_replica_engine,
+)
 from shared.infrastructure.database.settings import get_settings
 
 
@@ -40,11 +43,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     log = logging.getLogger("oficial.startup")
     log.info("Iniciando API Cómputo Oficial")
-    # Forzar creación del engine para detectar problemas de config en startup
+    # Forzar creación de ambos engines (master + replica) para detectar
+    # problemas de config en startup. FASE 7B: el cluster mantiene los
+    # dos pools listos para failover instantáneo.
     get_engine()
+    get_replica_engine()
     yield
     log.info("Cerrando API Cómputo Oficial")
-    await get_engine().dispose()
+    # Dispose de ambos engines (en cualquier orden, son independientes)
+    try:
+        await get_engine().dispose()
+    except Exception:
+        pass
+    try:
+        await get_replica_engine().dispose()
+    except Exception:
+        pass
 
 
 app = FastAPI(

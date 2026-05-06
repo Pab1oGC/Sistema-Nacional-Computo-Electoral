@@ -1,7 +1,7 @@
 # ============================================================
 # docker-compose.oficial.yml
 #
-# Cómputo Oficial: cluster Mirror PostgreSQL síncrono + API +
+# Cómputo Oficial: cluster Mirror PostgreSQL async + API +
 # n8n + dashboard propio. Red `rrv-net` compartida con el módulo
 # RRV del team lider (declarada como external).
 #
@@ -55,13 +55,15 @@ services:
     volumes:
       - oficial_master_data:/var/lib/postgresql/data
       # Init hooks. Orden alfabético importa: 00 → 01 → 04.
+      # Schema v2 (rama Alex_2.0): codigo_acta BIGINT, sin apertura/cierre,
+      # con observacion_formal + tipo_observacion_formal + provincia.
       - ./sql/00-replication-config.sh:/docker-entrypoint-initdb.d/00-replication-config.sh:ro
-      - ./sql/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./sql/04-carga-datos.sql:/docker-entrypoint-initdb.d/04-carga-datos.sql:ro
+      - ./sql/01-schema-v2.sql:/docker-entrypoint-initdb.d/01-schema-v2.sql:ro
+      - ./sql/04-carga-catalogos-v2.sql:/docker-entrypoint-initdb.d/04-carga-catalogos-v2.sql:ro
       # Documentación de referencia (no la consume el server)
       - ./sql/02-replication-master.conf:/etc/postgresql/replication.conf:ro
-      # CSVs accesibles vía \copy desde 04-carga-datos.sql
-      - ./data:/var/lib/postgresql/csv:ro
+      # CSVs v2 accesibles vía COPY server-side desde 04-carga-catalogos-v2.sql
+      - ./datos_originales/csvs_v2:/sql_data/csvs_v2:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oficial_writer -d oficial"]
       interval: 5s
@@ -103,6 +105,9 @@ services:
           chmod 0700 /var/lib/postgresql/data
           echo "hot_standby = on" >> /var/lib/postgresql/data/postgresql.conf
           echo "hot_standby_feedback = on" >> /var/lib/postgresql/data/postgresql.conf
+          # FASE 7A2: slot persistente. Garantiza WAL retention en master
+          # incluso con la réplica caída por horas/días.
+          echo "primary_slot_name = 'oficial_replica_slot'" >> /var/lib/postgresql/data/postgresql.conf
           echo "[replica] basebackup completo. Iniciando standby..."
         else
           echo "[replica] standby.signal presente. Iniciando standby existente..."
@@ -142,6 +147,9 @@ services:
     environment:
       DB_URL: postgresql+asyncpg://oficial_writer:${OFICIAL_DB_PASSWORD:-oficial_2025}@oficial_master:5432/oficial
       DB_URL_REPLICA: postgresql+asyncpg://dashboard_ro:${DASHBOARD_RO_PASSWORD:-dash_2025}@oficial_replica:5432/oficial
+      # Misma instancia que DB_URL_REPLICA pero con oficial_writer. Se
+      # activa post-failover cuando la réplica es promovida (FASE 7B).
+      DB_URL_REPLICA_AS_PRIMARY: postgresql+asyncpg://oficial_writer:${OFICIAL_DB_PASSWORD:-oficial_2025}@oficial_replica:5432/oficial
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Habilita el endpoint POST /api/v1/oficial/admin/reset-actas para
       # que n8n pueda alternar perfiles de carga durante la demo. En
@@ -150,6 +158,44 @@ services:
       ADMIN_RESET_ENABLED: ${ADMIN_RESET_ENABLED:-true}
     depends_on:
       oficial_master:
+        condition: service_healthy
+    networks:
+      - rrv-net
+
+  # ─────────────────────────────────────────────────────────
+  # Cluster Manager (FASE 7C). Detecta SPLIT BRAIN tras un
+  # failover y reincorpora automáticamente al ex-master como
+  # standby de la nueva primary usando pg_basebackup.
+  #
+  # Necesita docker.sock para hacer stop/start del master y
+  # ejecutar el basebackup desde un container temporal.
+  # ─────────────────────────────────────────────────────────
+  oficial_cluster_manager:
+    image: postgres:16.6-alpine
+    container_name: oficial_cluster_manager
+    hostname: oficial_cluster_manager
+    restart: unless-stopped
+    command: ["/scripts/cluster_manager.sh"]
+    volumes:
+      - ./scripts/cluster_manager.sh:/scripts/cluster_manager.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    environment:
+      PGUSER: oficial_writer
+      PGDATABASE: oficial
+      PGPASSWORD: ${OFICIAL_DB_PASSWORD:-oficial_2025}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-replica_2025}
+      API_BASE: http://oficial_api:8000
+      CHECK_INTERVAL: ${CLUSTER_MGR_INTERVAL:-10}
+      MASTER_HOST: oficial_master
+      REPLICA_HOST: oficial_replica
+      MASTER_VOLUME: oficial_oficial_master_data
+      DOCKER_NETWORK: rrv-net
+    depends_on:
+      oficial_master:
+        condition: service_healthy
+      oficial_replica:
+        condition: service_healthy
+      oficial_api:
         condition: service_healthy
     networks:
       - rrv-net

@@ -13,6 +13,7 @@ const ESTILO_BORDE: Record<ActiveForm['estado'], string> = {
   llenando: 'border-blue-400',
   esperando_submit: 'border-amber-400',
   enviando: 'border-orange-500',
+  reintentando: 'border-orange-400 animate-pulse',
   ok: 'border-emerald-500 bg-emerald-50',
   error: 'border-red-500 bg-red-50',
 };
@@ -31,6 +32,10 @@ const BADGE_ESTADO: Record<
   },
   enviando: {
     texto: '⏳ Enviando',
+    clases: 'bg-orange-100 text-orange-800',
+  },
+  reintentando: {
+    texto: '🔁 Reintentando',
     clases: 'bg-orange-100 text-orange-800',
   },
   ok: { texto: '✓ Registrada', clases: 'bg-emerald-100 text-emerald-800' },
@@ -162,6 +167,11 @@ export function ActaForm(props: ActaFormProps): JSX.Element {
           className={`text-xs px-2 py-1 rounded font-medium whitespace-nowrap ${badge.clases}`}
         >
           {badge.texto}
+          {form.estado === 'reintentando' && form.retryAttempt && (
+            <span className="ml-1 opacity-75">
+              ({form.retryAttempt}/5)
+            </span>
+          )}
         </span>
       </header>
 

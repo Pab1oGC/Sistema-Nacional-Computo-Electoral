@@ -19,6 +19,30 @@ CREATE SCHEMA IF NOT EXISTS oficial;
 SET search_path TO oficial, public;
 
 -- ──────────────────────────────────────────────────────────────────────
+-- ROLES (idempotente). El entrypoint oficial de Postgres ya crea
+-- oficial_writer (vía POSTGRES_USER), pero NO crea dashboard_ro ni
+-- oficial_replicator. Sin estos dos, la réplica no puede hacer
+-- pg_basebackup y el dashboard no puede leer en read-only.
+-- ──────────────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_ro') THEN
+        CREATE ROLE dashboard_ro LOGIN PASSWORD 'dash_2025';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'oficial_replicator') THEN
+        CREATE ROLE oficial_replicator REPLICATION LOGIN
+            PASSWORD 'replica_2025';
+    END IF;
+END
+$$;
+
+-- Permisos para dashboard_ro: SELECT en tablas presentes y futuras del
+-- schema oficial.
+GRANT USAGE ON SCHEMA oficial TO dashboard_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA oficial
+    GRANT SELECT ON TABLES TO dashboard_ro;
+
+-- ──────────────────────────────────────────────────────────────────────
 -- ENUM: tipos de observación formal del docente (9 categorías)
 -- ──────────────────────────────────────────────────────────────────────
 CREATE TYPE oficial.tipo_observacion_formal AS ENUM (

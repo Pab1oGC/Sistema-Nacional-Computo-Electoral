@@ -23,6 +23,17 @@ const GRID_CLASS: Record<FormsCount, string> = {
 const TIME_REMOVE_OK_MS = 1000;
 const TIME_REMOVE_ERROR_MS = 3000;
 
+// Backoff exponencial para retry tras error transitorio (network, 502/503/504).
+// Suma total: 52 segundos en 5 intentos. Después se da por error definitivo.
+const RETRY_DELAYS_MS: ReadonlyArray<number> = [2000, 5000, 10000, 15000, 20000];
+
+function isRetriableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => window.setTimeout(r, ms));
+
 function genId(): string {
   return `f-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -171,52 +182,39 @@ export function ActasLoaderView(): JSX.Element {
     submittingIdsRef.current.delete(id);
   }, []);
 
-  // ─── submitForm: lectura sincrónica del acta vía formsRef ───────
+  // ─── submitForm con retry-with-backoff (FASE 7A) ──────────────────
+  // Errores transitorios (network down, 502/503/504) se reintentan con
+  // backoff exponencial. Errores definitivos (4xx de validación, 409,
+  // 422) NO se reintentan: el frontend muestra el error y libera el slot.
   const submitForm = useCallback(
     async (id: string) => {
-      // Anti-doble-POST: si ya está en flight, no re-enviar.
       if (submittingIdsRef.current.has(id)) {
         console.debug(`[Form ${id}] submit ignorado (ya en flight)`);
         return;
       }
       const target = formsRef.current.find((f) => f.id === id);
-      if (!target) {
-        console.debug(`[Form ${id}] submit ignorado (form no existe)`);
-        return;
-      }
-      // Solo dispara desde estados elegibles.
+      if (!target) return;
       if (
         target.estado !== 'llenando' &&
         target.estado !== 'esperando_submit'
       ) {
-        console.debug(
-          `[Form ${id}] submit ignorado (estado=${target.estado})`,
-        );
         return;
       }
       submittingIdsRef.current.add(id);
-      // Cancelar timer de auto-submit pendiente, si existe.
       const tPending = timersRef.current.get(id);
       if (tPending !== undefined) {
         window.clearTimeout(tPending);
         timersRef.current.delete(id);
       }
 
-      setEstadoForm(id, 'enviando');
-
-      try {
-        const response = await apiClient.post(
-          '/api/v1/oficial/recuento',
-          target.acta,
-          { validateStatus: () => true },
-        );
-        if (response.status === 201 || response.status === 200) {
+      const acta = target.acta;
+      const finalizar = (estado: 'ok' | 'error', mensaje?: string) => {
+        if (estado === 'ok') {
           setEstadoForm(id, 'ok');
           setStats((s) => ({ ...s, ok: s.ok + 1 }));
           const t = window.setTimeout(() => removeForm(id), TIME_REMOVE_OK_MS);
           timersRef.current.set(id, t);
         } else {
-          const mensaje = extractMensajeError(response);
           setEstadoForm(id, 'error', mensaje);
           setStats((s) => ({ ...s, error: s.error + 1 }));
           const t = window.setTimeout(
@@ -225,15 +223,68 @@ export function ActasLoaderView(): JSX.Element {
           );
           timersRef.current.set(id, t);
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Network error';
-        setEstadoForm(id, 'error', msg);
-        setStats((s) => ({ ...s, error: s.error + 1 }));
-        const t = window.setTimeout(
-          () => removeForm(id),
-          TIME_REMOVE_ERROR_MS,
-        );
-        timersRef.current.set(id, t);
+      };
+
+      // Loop de attempts: 0 = primer envío, 1..5 = retries
+      for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+        if (attempt === 0) {
+          console.debug(`[Form ${id}] estado=enviando`);
+          setEstadoForm(id, 'enviando');
+        } else {
+          const delay = RETRY_DELAYS_MS[attempt - 1];
+          console.debug(
+            `[Form ${id}] estado=reintentando · intento=${attempt}/${RETRY_DELAYS_MS.length} · delay=${delay}ms`,
+          );
+          setForms((prev) =>
+            prev.map((f) =>
+              f.id === id
+                ? {
+                    ...f,
+                    estado: 'reintentando',
+                    retryAttempt: attempt,
+                    retryDelayMs: delay,
+                  }
+                : f,
+            ),
+          );
+          await sleep(delay);
+        }
+
+        try {
+          const response = await apiClient.post(
+            '/api/v1/oficial/recuento',
+            acta,
+            { validateStatus: () => true },
+          );
+          if (response.status === 201 || response.status === 200) {
+            finalizar('ok');
+            return;
+          }
+          // Error HTTP definitivo (4xx incluyendo 409/422 de validación)
+          if (!isRetriableStatus(response.status)) {
+            const mensaje = extractMensajeError(response);
+            finalizar('error', mensaje);
+            return;
+          }
+          // 502/503/504 → retry si quedan intentos
+          if (attempt === RETRY_DELAYS_MS.length) {
+            const mensaje = `Backend no disponible tras ${RETRY_DELAYS_MS.length + 1} intentos`;
+            finalizar('error', mensaje);
+            return;
+          }
+          // sigue al próximo iter
+        } catch (err) {
+          // Network error / connection refused: retry si quedan intentos
+          if (attempt === RETRY_DELAYS_MS.length) {
+            const msg =
+              err instanceof Error
+                ? `Sin red tras ${RETRY_DELAYS_MS.length + 1} intentos: ${err.message}`
+                : 'Network error agotó retries';
+            finalizar('error', msg);
+            return;
+          }
+          // sigue al próximo iter
+        }
       }
     },
     [removeForm, setEstadoForm],

@@ -18,6 +18,7 @@ export type EstadoForm =
   | 'llenando'
   | 'esperando_submit'
   | 'enviando'
+  | 'reintentando'
   | 'ok'
   | 'error';
 
@@ -27,6 +28,8 @@ export interface ActiveForm {
   estado: EstadoForm;
   mensaje?: string;
   cursorIdx: number;
+  retryAttempt?: number;     // 1..N, ausente si nunca reintentó
+  retryDelayMs?: number;     // delay del próximo retry (UI countdown)
 }
 
 export type FormsCount = 1 | 4 | 9 | 16;

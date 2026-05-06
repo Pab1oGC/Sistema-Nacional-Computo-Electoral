@@ -4,11 +4,45 @@ from fastapi import APIRouter, HTTPException, Query
 
 from composition_root import ResetActasUseCaseDep
 from recuento_oficial.presentation.schemas.admin_schemas import ResetActasResponse
+from shared.infrastructure.database.session import (
+    check_cluster_health,
+    get_current_primary,
+    get_last_failover_at,
+)
 
 # El prefix /api/v1/oficial/admin se compone con el include_router del main.
 router = APIRouter(prefix="/api/v1/oficial/admin", tags=["oficial-admin"])
 
 CONFIRMATION_TOKEN = "YES_DELETE_ALL"
+
+
+@router.get("/cluster-status")
+async def cluster_status() -> dict:
+    """Estado del cluster Mirror (master + replica) + el primary actual.
+
+    Reporta para cada nodo: si responde, si está en recovery, y el
+    error si no responde. Además expone:
+      - current_primary: 'master' o 'replica' (cambia tras failover)
+      - last_failover_at: ISO timestamp del último promote, o null
+    """
+    master, replica = await check_cluster_health()
+    last = get_last_failover_at()
+    return {
+        "current_primary": get_current_primary(),
+        "last_failover_at": last.isoformat() if last is not None else None,
+        "master": {
+            "host": master.host,
+            "alive": master.is_alive,
+            "in_recovery": master.is_in_recovery,
+            "error": master.error,
+        },
+        "replica": {
+            "host": replica.host,
+            "alive": replica.is_alive,
+            "in_recovery": replica.is_in_recovery,
+            "error": replica.error,
+        },
+    }
 
 
 @router.post("/reset-actas", response_model=ResetActasResponse)
